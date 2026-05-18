@@ -23,6 +23,7 @@ import { Route as AppCierresRouteImport } from './routes/_app.cierres'
 import { Route as AppBodegaRouteImport } from './routes/_app.bodega'
 import { Route as AppOrdenesIndexRouteImport } from './routes/_app.ordenes.index'
 import { Route as AppClientesIndexRouteImport } from './routes/_app.clientes.index'
+import { Route as AppOrdenesOrdenIdRouteImport } from './routes/_app.ordenes.$ordenId'
 import { Route as AppClientesClienteIdRouteImport } from './routes/_app.clientes.$clienteId'
 
 const LoginRoute = LoginRouteImport.update({
@@ -94,6 +95,11 @@ const AppClientesIndexRoute = AppClientesIndexRouteImport.update({
   path: '/clientes/',
   getParentRoute: () => AppRoute,
 } as any)
+const AppOrdenesOrdenIdRoute = AppOrdenesOrdenIdRouteImport.update({
+  id: '/ordenes/$ordenId',
+  path: '/ordenes/$ordenId',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppClientesClienteIdRoute = AppClientesClienteIdRouteImport.update({
   id: '/clientes/$clienteId',
   path: '/clientes/$clienteId',
@@ -113,6 +119,7 @@ export interface FileRoutesByFullPath {
   '/ordenes-compra': typeof AppOrdenesCompraRoute
   '/vehiculos': typeof AppVehiculosRoute
   '/clientes/$clienteId': typeof AppClientesClienteIdRoute
+  '/ordenes/$ordenId': typeof AppOrdenesOrdenIdRoute
   '/clientes/': typeof AppClientesIndexRoute
   '/ordenes/': typeof AppOrdenesIndexRoute
 }
@@ -129,6 +136,7 @@ export interface FileRoutesByTo {
   '/vehiculos': typeof AppVehiculosRoute
   '/': typeof AppIndexRoute
   '/clientes/$clienteId': typeof AppClientesClienteIdRoute
+  '/ordenes/$ordenId': typeof AppOrdenesOrdenIdRoute
   '/clientes': typeof AppClientesIndexRoute
   '/ordenes': typeof AppOrdenesIndexRoute
 }
@@ -147,6 +155,7 @@ export interface FileRoutesById {
   '/_app/vehiculos': typeof AppVehiculosRoute
   '/_app/': typeof AppIndexRoute
   '/_app/clientes/$clienteId': typeof AppClientesClienteIdRoute
+  '/_app/ordenes/$ordenId': typeof AppOrdenesOrdenIdRoute
   '/_app/clientes/': typeof AppClientesIndexRoute
   '/_app/ordenes/': typeof AppOrdenesIndexRoute
 }
@@ -165,6 +174,7 @@ export interface FileRouteTypes {
     | '/ordenes-compra'
     | '/vehiculos'
     | '/clientes/$clienteId'
+    | '/ordenes/$ordenId'
     | '/clientes/'
     | '/ordenes/'
   fileRoutesByTo: FileRoutesByTo
@@ -181,6 +191,7 @@ export interface FileRouteTypes {
     | '/vehiculos'
     | '/'
     | '/clientes/$clienteId'
+    | '/ordenes/$ordenId'
     | '/clientes'
     | '/ordenes'
   id:
@@ -198,6 +209,7 @@ export interface FileRouteTypes {
     | '/_app/vehiculos'
     | '/_app/'
     | '/_app/clientes/$clienteId'
+    | '/_app/ordenes/$ordenId'
     | '/_app/clientes/'
     | '/_app/ordenes/'
   fileRoutesById: FileRoutesById
@@ -307,6 +319,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppClientesIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/ordenes/$ordenId': {
+      id: '/_app/ordenes/$ordenId'
+      path: '/ordenes/$ordenId'
+      fullPath: '/ordenes/$ordenId'
+      preLoaderRoute: typeof AppOrdenesOrdenIdRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/clientes/$clienteId': {
       id: '/_app/clientes/$clienteId'
       path: '/clientes/$clienteId'
@@ -329,6 +348,7 @@ interface AppRouteChildren {
   AppVehiculosRoute: typeof AppVehiculosRoute
   AppIndexRoute: typeof AppIndexRoute
   AppClientesClienteIdRoute: typeof AppClientesClienteIdRoute
+  AppOrdenesOrdenIdRoute: typeof AppOrdenesOrdenIdRoute
   AppClientesIndexRoute: typeof AppClientesIndexRoute
   AppOrdenesIndexRoute: typeof AppOrdenesIndexRoute
 }
@@ -345,6 +365,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppVehiculosRoute: AppVehiculosRoute,
   AppIndexRoute: AppIndexRoute,
   AppClientesClienteIdRoute: AppClientesClienteIdRoute,
+  AppOrdenesOrdenIdRoute: AppOrdenesOrdenIdRoute,
   AppClientesIndexRoute: AppClientesIndexRoute,
   AppOrdenesIndexRoute: AppOrdenesIndexRoute,
 }
