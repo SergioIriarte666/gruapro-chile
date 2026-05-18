@@ -486,6 +486,6 @@ function AlertRow({
       <Badge variant={variant === "destructive" ? "destructive" : "outline"}>
         {variant === "destructive" ? "Urgente" : "Atención"}
       </Badge>
-    </Link>
+    </a>
   );
 }
