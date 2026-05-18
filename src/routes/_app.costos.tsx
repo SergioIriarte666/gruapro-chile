@@ -238,20 +238,23 @@ function CostosPage() {
             Registro de gastos operacionales y por servicio.
           </p>
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="h-4 w-4 mr-2" /> Nuevo costo
-            </Button>
-          </DialogTrigger>
-          <NuevoCostoDialog
-            onClose={() => setOpen(false)}
-            categorias={categorias}
-            subcategorias={subcategorias}
-            gruas={gruas as any}
-            proveedores={proveedores as any}
-          />
-        </Dialog>
+        <div className="flex gap-2">
+          <ExcelImporter modulo="costos" invalidateKeys={[["costos"]]} />
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="h-4 w-4 mr-2" /> Nuevo costo
+              </Button>
+            </DialogTrigger>
+            <NuevoCostoDialog
+              onClose={() => setOpen(false)}
+              categorias={categorias}
+              subcategorias={subcategorias}
+              gruas={gruas as any}
+              proveedores={proveedores as any}
+            />
+          </Dialog>
+        </div>
       </div>
 
       <Card>
