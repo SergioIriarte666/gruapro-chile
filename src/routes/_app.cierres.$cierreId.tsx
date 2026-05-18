@@ -125,8 +125,11 @@ function CierreDetalle() {
   });
 
   const updateCierre = useMutation({
-    mutationFn: async (patch: Partial<Cierre>) => {
-      const { error } = await supabase.from("cierres").update(patch).eq("id", cierreId);
+    mutationFn: async (patch: Record<string, unknown>) => {
+      const { error } = await supabase
+        .from("cierres")
+        .update(patch as never)
+        .eq("id", cierreId);
       if (error) throw error;
     },
     onSuccess: () => {
