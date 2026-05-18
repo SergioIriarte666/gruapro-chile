@@ -239,7 +239,12 @@ function CostosPage() {
             Registro de gastos operacionales y por servicio.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <DteXmlImporter
+            categorias={categorias as any}
+            subcategorias={subcategorias as any}
+            invalidateKeys={[["costos"]]}
+          />
           <ExcelImporter modulo="costos" invalidateKeys={[["costos"]]} />
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
