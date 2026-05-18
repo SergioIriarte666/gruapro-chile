@@ -19,6 +19,7 @@ import { Route as AppOperadoresRouteImport } from './routes/_app.operadores'
 import { Route as AppGruasRouteImport } from './routes/_app.gruas'
 import { Route as AppCotizacionesRouteImport } from './routes/_app.cotizaciones'
 import { Route as AppCostosRouteImport } from './routes/_app.costos'
+import { Route as AppConfiguracionRouteImport } from './routes/_app.configuracion'
 import { Route as AppClientesRouteImport } from './routes/_app.clientes'
 import { Route as AppCierresRouteImport } from './routes/_app.cierres'
 import { Route as AppBodegaRouteImport } from './routes/_app.bodega'
@@ -72,6 +73,11 @@ const AppCostosRoute = AppCostosRouteImport.update({
   path: '/costos',
   getParentRoute: () => AppRoute,
 } as any)
+const AppConfiguracionRoute = AppConfiguracionRouteImport.update({
+  id: '/configuracion',
+  path: '/configuracion',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppClientesRoute = AppClientesRouteImport.update({
   id: '/clientes',
   path: '/clientes',
@@ -94,6 +100,7 @@ export interface FileRoutesByFullPath {
   '/bodega': typeof AppBodegaRoute
   '/cierres': typeof AppCierresRoute
   '/clientes': typeof AppClientesRoute
+  '/configuracion': typeof AppConfiguracionRoute
   '/costos': typeof AppCostosRoute
   '/cotizaciones': typeof AppCotizacionesRoute
   '/gruas': typeof AppGruasRoute
@@ -107,6 +114,7 @@ export interface FileRoutesByTo {
   '/bodega': typeof AppBodegaRoute
   '/cierres': typeof AppCierresRoute
   '/clientes': typeof AppClientesRoute
+  '/configuracion': typeof AppConfiguracionRoute
   '/costos': typeof AppCostosRoute
   '/cotizaciones': typeof AppCotizacionesRoute
   '/gruas': typeof AppGruasRoute
@@ -123,6 +131,7 @@ export interface FileRoutesById {
   '/_app/bodega': typeof AppBodegaRoute
   '/_app/cierres': typeof AppCierresRoute
   '/_app/clientes': typeof AppClientesRoute
+  '/_app/configuracion': typeof AppConfiguracionRoute
   '/_app/costos': typeof AppCostosRoute
   '/_app/cotizaciones': typeof AppCotizacionesRoute
   '/_app/gruas': typeof AppGruasRoute
@@ -140,6 +149,7 @@ export interface FileRouteTypes {
     | '/bodega'
     | '/cierres'
     | '/clientes'
+    | '/configuracion'
     | '/costos'
     | '/cotizaciones'
     | '/gruas'
@@ -153,6 +163,7 @@ export interface FileRouteTypes {
     | '/bodega'
     | '/cierres'
     | '/clientes'
+    | '/configuracion'
     | '/costos'
     | '/cotizaciones'
     | '/gruas'
@@ -168,6 +179,7 @@ export interface FileRouteTypes {
     | '/_app/bodega'
     | '/_app/cierres'
     | '/_app/clientes'
+    | '/_app/configuracion'
     | '/_app/costos'
     | '/_app/cotizaciones'
     | '/_app/gruas'
@@ -255,6 +267,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppCostosRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/configuracion': {
+      id: '/_app/configuracion'
+      path: '/configuracion'
+      fullPath: '/configuracion'
+      preLoaderRoute: typeof AppConfiguracionRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/clientes': {
       id: '/_app/clientes'
       path: '/clientes'
@@ -283,6 +302,7 @@ interface AppRouteChildren {
   AppBodegaRoute: typeof AppBodegaRoute
   AppCierresRoute: typeof AppCierresRoute
   AppClientesRoute: typeof AppClientesRoute
+  AppConfiguracionRoute: typeof AppConfiguracionRoute
   AppCostosRoute: typeof AppCostosRoute
   AppCotizacionesRoute: typeof AppCotizacionesRoute
   AppGruasRoute: typeof AppGruasRoute
@@ -297,6 +317,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppBodegaRoute: AppBodegaRoute,
   AppCierresRoute: AppCierresRoute,
   AppClientesRoute: AppClientesRoute,
+  AppConfiguracionRoute: AppConfiguracionRoute,
   AppCostosRoute: AppCostosRoute,
   AppCotizacionesRoute: AppCotizacionesRoute,
   AppGruasRoute: AppGruasRoute,
