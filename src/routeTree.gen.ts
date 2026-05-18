@@ -20,7 +20,6 @@ import { Route as AppGruasRouteImport } from './routes/_app.gruas'
 import { Route as AppCotizacionesRouteImport } from './routes/_app.cotizaciones'
 import { Route as AppCostosRouteImport } from './routes/_app.costos'
 import { Route as AppConfiguracionRouteImport } from './routes/_app.configuracion'
-import { Route as AppClientesRouteImport } from './routes/_app.clientes'
 import { Route as AppCierresRouteImport } from './routes/_app.cierres'
 import { Route as AppBodegaRouteImport } from './routes/_app.bodega'
 
@@ -78,11 +77,6 @@ const AppConfiguracionRoute = AppConfiguracionRouteImport.update({
   path: '/configuracion',
   getParentRoute: () => AppRoute,
 } as any)
-const AppClientesRoute = AppClientesRouteImport.update({
-  id: '/clientes',
-  path: '/clientes',
-  getParentRoute: () => AppRoute,
-} as any)
 const AppCierresRoute = AppCierresRouteImport.update({
   id: '/cierres',
   path: '/cierres',
@@ -99,7 +93,6 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/bodega': typeof AppBodegaRoute
   '/cierres': typeof AppCierresRoute
-  '/clientes': typeof AppClientesRoute
   '/configuracion': typeof AppConfiguracionRoute
   '/costos': typeof AppCostosRoute
   '/cotizaciones': typeof AppCotizacionesRoute
@@ -113,7 +106,6 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/bodega': typeof AppBodegaRoute
   '/cierres': typeof AppCierresRoute
-  '/clientes': typeof AppClientesRoute
   '/configuracion': typeof AppConfiguracionRoute
   '/costos': typeof AppCostosRoute
   '/cotizaciones': typeof AppCotizacionesRoute
@@ -130,7 +122,6 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/_app/bodega': typeof AppBodegaRoute
   '/_app/cierres': typeof AppCierresRoute
-  '/_app/clientes': typeof AppClientesRoute
   '/_app/configuracion': typeof AppConfiguracionRoute
   '/_app/costos': typeof AppCostosRoute
   '/_app/cotizaciones': typeof AppCotizacionesRoute
@@ -148,7 +139,6 @@ export interface FileRouteTypes {
     | '/login'
     | '/bodega'
     | '/cierres'
-    | '/clientes'
     | '/configuracion'
     | '/costos'
     | '/cotizaciones'
@@ -162,7 +152,6 @@ export interface FileRouteTypes {
     | '/login'
     | '/bodega'
     | '/cierres'
-    | '/clientes'
     | '/configuracion'
     | '/costos'
     | '/cotizaciones'
@@ -178,7 +167,6 @@ export interface FileRouteTypes {
     | '/login'
     | '/_app/bodega'
     | '/_app/cierres'
-    | '/_app/clientes'
     | '/_app/configuracion'
     | '/_app/costos'
     | '/_app/cotizaciones'
@@ -274,13 +262,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppConfiguracionRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/clientes': {
-      id: '/_app/clientes'
-      path: '/clientes'
-      fullPath: '/clientes'
-      preLoaderRoute: typeof AppClientesRouteImport
-      parentRoute: typeof AppRoute
-    }
     '/_app/cierres': {
       id: '/_app/cierres'
       path: '/cierres'
@@ -301,7 +282,6 @@ declare module '@tanstack/react-router' {
 interface AppRouteChildren {
   AppBodegaRoute: typeof AppBodegaRoute
   AppCierresRoute: typeof AppCierresRoute
-  AppClientesRoute: typeof AppClientesRoute
   AppConfiguracionRoute: typeof AppConfiguracionRoute
   AppCostosRoute: typeof AppCostosRoute
   AppCotizacionesRoute: typeof AppCotizacionesRoute
@@ -316,7 +296,6 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppBodegaRoute: AppBodegaRoute,
   AppCierresRoute: AppCierresRoute,
-  AppClientesRoute: AppClientesRoute,
   AppConfiguracionRoute: AppConfiguracionRoute,
   AppCostosRoute: AppCostosRoute,
   AppCotizacionesRoute: AppCotizacionesRoute,
@@ -337,3 +316,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
