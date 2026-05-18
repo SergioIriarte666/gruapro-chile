@@ -465,7 +465,8 @@ function AlertRow({
 }) {
   return (
     <Link
-      to={to}
+      to={to as string}
+      // @ts-expect-error dynamic route string
       className="flex items-center justify-between gap-3 p-3 rounded-md border hover:bg-accent transition"
     >
       <div className="flex items-center gap-3 min-w-0">
