@@ -3,6 +3,42 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
+export const ensureUserRole = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => z.object({}).parse(input))
+  .handler(async ({ context }) => {
+    try {
+      const userId = context.userId as string;
+
+      const { data: existentes, error: existentesErr } = await supabaseAdmin
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", userId);
+      if (existentesErr) throw new Error(existentesErr.message);
+
+      if ((existentes?.length ?? 0) > 0) {
+        return { ok: true, roles: existentes!.map((r) => r.role) };
+      }
+
+      const { count, error: countErr } = await supabaseAdmin
+        .from("user_roles")
+        .select("id", { count: "exact", head: true });
+      if (countErr) throw new Error(countErr.message);
+
+      const role = (count ?? 0) === 0 ? "admin" : "operador";
+      const { error: insErr } = await supabaseAdmin
+        .from("user_roles")
+        .insert({ user_id: userId, role });
+      if (insErr) throw new Error(insErr.message);
+
+      return { ok: true, assigned: role };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Error desconocido";
+      const isMissingAdminKey = message.includes("SUPABASE_SERVICE_ROLE_KEY");
+      return { ok: false, error: isMissingAdminKey ? "ADMIN_KEY_MISSING" : message };
+    }
+  });
+
 // Marca una orden como completada y genera la comisión del operador
 // según config_comisiones.tipo_servicio. Idempotente: no duplica comisión.
 export const completarOrden = createServerFn({ method: "POST" })
