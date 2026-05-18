@@ -1,3 +1,4 @@
+import { ExcelImporter } from "@/components/excel-importer";
 import { useMemo, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
@@ -147,9 +148,12 @@ function OrdenesPage() {
       <Card>
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle>Órdenes de servicio</CardTitle>
-          <Button onClick={() => setOpenCreate(true)}>
-            <Plus /> Nueva orden
-          </Button>
+          <div className="flex gap-2">
+            <ExcelImporter modulo="servicios" invalidateKeys={[["ordenes"]]} />
+            <Button onClick={() => setOpenCreate(true)}>
+              <Plus /> Nueva orden
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
