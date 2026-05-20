@@ -46,14 +46,18 @@ export const completarOrden = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z.object({ ordenId: z.string().uuid() }).parse(input),
   )
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
     const { data: orden, error: ordenErr } = await supabaseAdmin
       .from("ordenes_servicio")
-      .select("id, estado, operador_id, tipo_servicio")
+      .select("id, estado, operador_id, grua_id, tipo_servicio")
       .eq("id", data.ordenId)
       .single();
     if (ordenErr) throw new Error(ordenErr.message);
     if (!orden) throw new Error("Orden no encontrada");
+
+    if (!orden.operador_id || !orden.grua_id) {
+      throw new Error("Para completar la orden debes asignar grúa y operador");
+    }
 
     const { error: updErr } = await supabaseAdmin
       .from("ordenes_servicio")
@@ -61,35 +65,28 @@ export const completarOrden = createServerFn({ method: "POST" })
       .eq("id", orden.id);
     if (updErr) throw new Error(updErr.message);
 
-    if (!orden.operador_id || !orden.tipo_servicio) {
-      return { ok: true, comisionCreada: false };
-    }
+    await supabaseAdmin
+      .from("service_change_history")
+      .insert({
+        entity_type: "orden",
+        entity_id: orden.id,
+        action: "estado_changed",
+        old_value: orden,
+        new_value: { estado: "completado" },
+        created_by: context.userId as string,
+      });
 
-    // ¿ya hay comisión?
-    const { data: existente } = await supabaseAdmin
+    const { data: comision } = await supabaseAdmin
       .from("comisiones")
-      .select("id")
+      .select("monto_comision")
       .eq("orden_id", orden.id)
       .maybeSingle();
-    if (existente) return { ok: true, comisionCreada: false };
 
-    // Buscar monto de comisión configurado
-    const { data: cfg } = await supabaseAdmin
-      .from("config_comisiones")
-      .select("monto_comision")
-      .eq("tipo_servicio", orden.tipo_servicio)
-      .maybeSingle();
-    const monto = Number(cfg?.monto_comision ?? 0);
-
-    const { error: comErr } = await supabaseAdmin.from("comisiones").insert({
-      orden_id: orden.id,
-      operador_id: orden.operador_id,
-      monto_comision: monto,
-      estado: "pendiente",
-    });
-    if (comErr) throw new Error(comErr.message);
-
-    return { ok: true, comisionCreada: true, monto };
+    return {
+      ok: true,
+      comisionCreada: !!comision,
+      monto: comision ? Number(comision.monto_comision ?? 0) : 0,
+    };
   });
 
 // Anula la orden y elimina la comisión pendiente si existiera.
@@ -98,19 +95,42 @@ export const anularOrden = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z.object({ ordenId: z.string().uuid() }).parse(input),
   )
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
+    const { data: orden, error: ordenErr } = await supabaseAdmin
+      .from("ordenes_servicio")
+      .select("id, estado, operador_id, grua_id, tipo_servicio")
+      .eq("id", data.ordenId)
+      .single();
+    if (ordenErr) throw new Error(ordenErr.message);
+
+    const { data: cierreActivo, error: cierreErr } = await supabaseAdmin
+      .from("cierre_servicios")
+      .select("id, cierres(estado)")
+      .eq("orden_id", data.ordenId)
+      .maybeSingle();
+    if (cierreErr) throw new Error(cierreErr.message);
+
+    const estadoCierre = (cierreActivo as any)?.cierres?.estado as string | undefined;
+    if (estadoCierre && estadoCierre !== "anulado") {
+      throw new Error("No se puede anular una orden incluida en un cierre activo");
+    }
+
     const { error: updErr } = await supabaseAdmin
       .from("ordenes_servicio")
       .update({ estado: "anulado" })
       .eq("id", data.ordenId);
     if (updErr) throw new Error(updErr.message);
 
-    const { error: delErr } = await supabaseAdmin
-      .from("comisiones")
-      .delete()
-      .eq("orden_id", data.ordenId)
-      .eq("estado", "pendiente");
-    if (delErr) throw new Error(delErr.message);
+    await supabaseAdmin
+      .from("service_change_history")
+      .insert({
+        entity_type: "orden",
+        entity_id: data.ordenId,
+        action: "estado_changed",
+        old_value: orden,
+        new_value: { estado: "anulado" },
+        created_by: context.userId as string,
+      });
 
     return { ok: true };
   });
@@ -122,15 +142,40 @@ export const cambiarEstadoOrden = createServerFn({ method: "POST" })
     z
       .object({
         ordenId: z.string().uuid(),
-        estado: z.enum(["pendiente", "asignado", "en_curso"]),
+        estado: z.enum(["pendiente", "en_curso"]),
       })
       .parse(input),
   )
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
+    const { data: before, error: beforeErr } = await supabaseAdmin
+      .from("ordenes_servicio")
+      .select("id, estado, operador_id, grua_id, tipo_servicio")
+      .eq("id", data.ordenId)
+      .single();
+    if (beforeErr) throw new Error(beforeErr.message);
+
+    if (data.estado === "en_curso") {
+      if (!before.grua_id || !before.operador_id) {
+        throw new Error("Para iniciar la orden debes asignar grúa y operador");
+      }
+    }
+
     const { error } = await supabaseAdmin
       .from("ordenes_servicio")
       .update({ estado: data.estado })
       .eq("id", data.ordenId);
     if (error) throw new Error(error.message);
+
+    await supabaseAdmin
+      .from("service_change_history")
+      .insert({
+        entity_type: "orden",
+        entity_id: data.ordenId,
+        action: "estado_changed",
+        old_value: before,
+        new_value: { estado: data.estado },
+        created_by: context.userId as string,
+      });
+
     return { ok: true };
   });

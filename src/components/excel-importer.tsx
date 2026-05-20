@@ -125,15 +125,21 @@ export function ExcelImporter({ modulo, invalidateKeys = [] }: Props) {
         return;
       }
       const headers = (rows[0] ?? []).map((h: any) => String(h ?? "").trim());
-      // Data starts at row 3 (index 2): row 1 headers, row 2 example
-      const dataRows = rows.slice(2).filter((r) => Array.isArray(r) && r.some((c) => c !== null && c !== undefined && String(c).trim() !== ""));
+      // Data starts at row 4 (index 3): row 1 headers, row 2 example, row 3 instrucciones
+      const dataRows = rows
+        .slice(3)
+        .filter(
+          (r) =>
+            Array.isArray(r) &&
+            r.some((c) => c !== null && c !== undefined && String(c).trim() !== ""),
+        );
 
       const errors: RowError[] = [];
       const validRows: ParsedState["validRows"] = [];
       const errorRaws: Array<Record<string, any>> = [];
 
       for (let i = 0; i < dataRows.length; i++) {
-        const excelRow = i + 3;
+        const excelRow = i + 4;
         const arr = dataRows[i];
         const raw: Record<string, any> = {};
         headers.forEach((h, idx) => {
@@ -218,11 +224,80 @@ export function ExcelImporter({ modulo, invalidateKeys = [] }: Props) {
     setImporting(true);
     try {
       const payloads = parsed.validRows.map((r) => r.payload);
-      const query = supabase.from(config.table as any);
-      const { error } = config.conflictField
-        ? await query.upsert(payloads as any, { onConflict: config.conflictField })
-        : await query.insert(payloads as any);
-      if (error) throw error;
+      if (config.module === "bodega") {
+        const today = new Date().toISOString().slice(0, 10);
+        for (const p of payloads as any[]) {
+          const cantidad = Number(p.cantidad ?? 0);
+          if (!cantidad || cantidad <= 0) throw new Error("Cantidad inválida en bodega");
+
+          const { data: existing, error: findErr } = await supabase
+            .from("bodega_items")
+            .select("id")
+            .ilike("nombre", String(p.nombre))
+            .eq("subcategoria_id", p.subcategoria_id ?? null)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (findErr) throw findErr;
+
+          let itemId = existing?.id as string | undefined;
+          if (!itemId) {
+            const { data: created, error: createErr } = await supabase
+              .from("bodega_items")
+              .insert({
+                nombre: String(p.nombre),
+                subcategoria_id: p.subcategoria_id ?? null,
+                proveedor_id: p.proveedor_id ?? null,
+                stock_minimo: Number(p.stock_minimo ?? 0),
+                precio_costo: Number(p.precio_costo ?? 0),
+                unidad: p.unidad ?? "unidad",
+                ubicacion: null,
+              })
+              .select("id")
+              .single();
+            if (createErr) throw createErr;
+            itemId = (created as any).id as string;
+          } else {
+            const { error: updErr } = await supabase
+              .from("bodega_items")
+              .update({
+                subcategoria_id: p.subcategoria_id ?? null,
+                proveedor_id: p.proveedor_id ?? null,
+                stock_minimo: Number(p.stock_minimo ?? 0),
+                precio_costo: Number(p.precio_costo ?? 0),
+                unidad: p.unidad ?? "unidad",
+              })
+              .eq("id", itemId);
+            if (updErr) throw updErr;
+          }
+
+          const { error: movErr } = await supabase.from("bodega_movimientos").insert({
+            item_id: itemId,
+            tipo: "entrada",
+            cantidad,
+            fecha: today,
+            descripcion: "Importación Excel",
+            grua_id: null,
+            orden_id: null,
+          });
+          if (movErr) throw movErr;
+        }
+      } else {
+        const query = supabase.from(config.table as any);
+        const { error } = config.conflictField
+          ? await query.upsert(payloads as any, { onConflict: config.conflictField })
+          : await query.insert(payloads as any);
+        if (error) throw error;
+      }
+
+      const { error: histErr } = await (supabase as any).from("service_change_history").insert({
+        entity_type: "import",
+        entity_id: crypto.randomUUID(),
+        action: "excel_imported",
+        new_value: { module: config.module, table: config.table, total: payloads.length },
+      });
+      if (histErr) throw new Error(histErr.message);
+
       toast.success(`${payloads.length} filas importadas`);
       invalidateKeys.forEach((k) => qc.invalidateQueries({ queryKey: k }));
       setOpen(false);

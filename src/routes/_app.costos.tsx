@@ -52,12 +52,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatCLP, formatDate } from "@/lib/format";
+import { createCostoSchema } from "@/lib/validations/costos";
 
 export const Route = createFileRoute("/_app/costos")({
   component: CostosPage,
 });
 
-const MEDIO_PAGO = ["transferencia", "efectivo", "tarjeta", "cheque", "credito"];
+const MEDIO_PAGO = ["transferencia", "efectivo", "tarjeta", "cheque"];
 const TIPO_COSTO = [
   { value: "servicio", label: "Por servicio" },
   { value: "operacional", label: "Operacional" },
@@ -84,10 +85,12 @@ type Costo = {
   subcategoria_id: string | null;
   grua_id: string | null;
   proveedor_id: string | null;
+  orden_id: string | null;
   categorias_costo: { nombre: string } | null;
   subcategorias_costo: { nombre: string } | null;
   gruas: { patente: string } | null;
   proveedores: { nombre: string } | null;
+  ordenes_servicio: { folio_interno: string | null } | null;
 };
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -162,7 +165,7 @@ function CostosPage() {
       const { data, error } = await supabase
         .from("costos")
         .select(
-          "*, categorias_costo(nombre), subcategorias_costo(nombre), gruas(patente), proveedores(nombre)",
+          "*, categorias_costo(nombre), subcategorias_costo(nombre), gruas(patente), proveedores(nombre), ordenes_servicio(folio_interno)",
         )
         .gte("fecha", fechaDesde)
         .lte("fecha", fechaHasta)
@@ -179,7 +182,7 @@ function CostosPage() {
       const { data, error } = await supabase
         .from("ordenes_servicio")
         .select("monto")
-        .eq("estado", "completado")
+        .in("estado", ["completado", "facturado"])
         .gte("fecha_servicio", fechaDesde)
         .lte("fecha_servicio", `${fechaHasta}T23:59:59`);
       if (error) throw error;
@@ -198,7 +201,9 @@ function CostosPage() {
         const m =
           (c.descripcion ?? "").toLowerCase().includes(q) ||
           (c.numero_documento ?? "").toLowerCase().includes(q) ||
-          (c.proveedores?.nombre ?? "").toLowerCase().includes(q);
+          (c.proveedores?.nombre ?? "").toLowerCase().includes(q) ||
+          (c.gruas?.patente ?? "").toLowerCase().includes(q) ||
+          (c.ordenes_servicio?.folio_interno ?? "").toLowerCase().includes(q);
         if (!m) return false;
       }
       return true;
@@ -340,7 +345,7 @@ function CostosPage() {
           <div className="relative max-w-sm">
             <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Descripción, documento o proveedor…"
+              placeholder="Descripción, documento, proveedor o folio…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-8"
@@ -357,15 +362,16 @@ function CostosPage() {
                     <TableHead>Proveedor</TableHead>
                     <TableHead>Grúa</TableHead>
                     <TableHead>Doc.</TableHead>
+                    <TableHead>Orden</TableHead>
                     <TableHead className="text-right">Monto</TableHead>
                     <TableHead className="w-20"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {isLoading ? (
-                    <TableRow><TableCell colSpan={8} className="text-center py-6 text-muted-foreground">Cargando…</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={9} className="text-center py-6 text-muted-foreground">Cargando…</TableCell></TableRow>
                   ) : filtrados.length === 0 ? (
-                    <TableRow><TableCell colSpan={8} className="text-center py-6 text-muted-foreground">Sin costos en el período.</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={9} className="text-center py-6 text-muted-foreground">Sin costos en el período.</TableCell></TableRow>
                   ) : filtrados.map((c) => (
                     <TableRow key={c.id}>
                       <TableCell>{formatDate(c.fecha)}</TableCell>
@@ -374,6 +380,7 @@ function CostosPage() {
                       <TableCell>{c.proveedores?.nombre ?? "—"}</TableCell>
                       <TableCell>{c.gruas?.patente ?? "—"}</TableCell>
                       <TableCell>{c.numero_documento ?? "—"}</TableCell>
+                      <TableCell className="font-medium">{c.ordenes_servicio?.folio_interno ?? "—"}</TableCell>
                       <TableCell className="text-right">{formatCLP(c.monto)}</TableCell>
                       <TableCell className="flex gap-1">
                         {c.archivo_url && (
@@ -399,7 +406,7 @@ function CostosPage() {
                 {filtrados.length > 0 && (
                   <tfoot>
                     <tr className="border-t font-semibold">
-                      <td colSpan={6} className="p-3 text-right">Total:</td>
+                      <td colSpan={7} className="p-3 text-right">Total:</td>
                       <td className="p-3 text-right">{formatCLP(totalCostos)}</td>
                       <td></td>
                     </tr>
@@ -470,6 +477,8 @@ function NuevoCostoDialog({
   const [tipo, setTipo] = useState<string>("operacional");
   const [categoriaId, setCategoriaId] = useState<string>("");
   const [subcategoriaId, setSubcategoriaId] = useState<string>("");
+  const [ordenId, setOrdenId] = useState<string>("none");
+  const [ordenSearch, setOrdenSearch] = useState("");
   const [monto, setMonto] = useState<string>("");
   const [medio, setMedio] = useState<string>("transferencia");
   const [numDoc, setNumDoc] = useState("");
@@ -480,6 +489,14 @@ function NuevoCostoDialog({
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => setSubcategoriaId(""), [categoriaId]);
+  useEffect(() => {
+    setOrdenId("none");
+    setOrdenSearch("");
+  }, [tipo]);
+
+  const categoriasFiltradas = categorias.filter(
+    (c) => !c.tipo || c.tipo === tipo || c.tipo === "ambos",
+  );
 
   const subsFiltradas = subcategorias.filter(
     (s) =>
@@ -487,13 +504,43 @@ function NuevoCostoDialog({
       (!s.aplica_a || s.aplica_a === "ambos" || s.aplica_a === tipo),
   );
 
+  const { data: ordenes = [], isLoading: loadingOrdenes } = useQuery({
+    queryKey: ["ordenes", "search", ordenSearch],
+    enabled: tipo === "servicio" && ordenSearch.trim().length >= 2,
+    queryFn: async () => {
+      const q = ordenSearch.trim();
+      const { data, error } = await supabase
+        .from("ordenes_servicio")
+        .select("id, folio_interno, folio_cliente, clientes(nombre)")
+        .or(`folio_interno.ilike.%${q}%,folio_cliente.ilike.%${q}%`)
+        .order("fecha_servicio", { ascending: false })
+        .limit(30);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
   const submit = async () => {
-    if (!categoriaId || !monto) {
-      toast.error("Categoría y monto son obligatorios");
+    const result = createCostoSchema.safeParse({
+      fecha,
+      categoria_id: categoriaId,
+      subcategoria_id: subcategoriaId,
+      monto,
+      medio_pago: (medio || undefined) as any,
+      tipo: tipo as any,
+      orden_id: tipo === "servicio" && ordenId !== "none" ? ordenId : undefined,
+      grua_id: gruaId !== "none" ? gruaId : undefined,
+      proveedor_id: proveedorId !== "none" ? proveedorId : undefined,
+      numero_documento: numDoc || undefined,
+      descripcion: descripcion || undefined,
+    });
+    if (!result.success) {
+      toast.error(result.error.issues[0]?.message ?? "Revisa los campos obligatorios");
       return;
     }
     setSubmitting(true);
     try {
+      const parsed = result.data;
       let archivoUrl: string | null = null;
       if (file) {
         const ext = file.name.split(".").pop();
@@ -506,16 +553,17 @@ function NuevoCostoDialog({
       }
 
       const { error } = await supabase.from("costos").insert({
-        fecha,
-        tipo,
-        categoria_id: categoriaId,
-        subcategoria_id: subcategoriaId || null,
-        monto: Number(monto),
-        medio_pago: medio,
-        numero_documento: numDoc || null,
-        grua_id: gruaId !== "none" ? gruaId : null,
-        proveedor_id: proveedorId !== "none" ? proveedorId : null,
-        descripcion: descripcion || null,
+        fecha: parsed.fecha,
+        tipo: parsed.tipo,
+        categoria_id: parsed.categoria_id,
+        subcategoria_id: parsed.subcategoria_id,
+        monto: Number(parsed.monto),
+        medio_pago: parsed.medio_pago ?? null,
+        orden_id: parsed.orden_id ?? null,
+        numero_documento: parsed.numero_documento ?? null,
+        grua_id: parsed.grua_id ?? null,
+        proveedor_id: parsed.proveedor_id ?? null,
+        descripcion: parsed.descripcion ?? null,
         archivo_url: archivoUrl,
       });
       if (error) throw error;
@@ -549,18 +597,62 @@ function NuevoCostoDialog({
             </SelectContent>
           </Select>
         </div>
+        {tipo === "servicio" && (
+          <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <Label>Buscar orden *</Label>
+              <Input
+                value={ordenSearch}
+                onChange={(e) => setOrdenSearch(e.target.value)}
+                placeholder="Folio interno o folio cliente…"
+              />
+            </div>
+            <div>
+              <Label>Orden *</Label>
+              <Select value={ordenId} onValueChange={setOrdenId} disabled={ordenSearch.trim().length < 2}>
+                <SelectTrigger>
+                  <SelectValue
+                    placeholder={
+                      ordenSearch.trim().length < 2
+                        ? "Escribe al menos 2 caracteres"
+                        : loadingOrdenes
+                          ? "Buscando…"
+                          : "Selecciona…"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {ordenes.length === 0 ? (
+                    <div className="p-2 text-sm text-muted-foreground">Sin resultados</div>
+                  ) : (
+                    ordenes.map((o: any) => (
+                      <SelectItem key={o.id} value={o.id}>
+                        {(o.folio_interno ?? "Sin folio") +
+                          (o.clientes?.nombre ? ` · ${o.clientes.nombre}` : "")}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        )}
         <div>
           <Label>Categoría *</Label>
           <Select value={categoriaId} onValueChange={setCategoriaId}>
             <SelectTrigger><SelectValue placeholder="Selecciona…" /></SelectTrigger>
             <SelectContent>
-              {categorias.map((c) => <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>)}
+              {categoriasFiltradas.map((c) => <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
         <div>
-          <Label>Subcategoría</Label>
-          <Select value={subcategoriaId} onValueChange={setSubcategoriaId} disabled={!categoriaId}>
+          <Label>Subcategoría *</Label>
+          <Select
+            value={subcategoriaId}
+            onValueChange={setSubcategoriaId}
+            disabled={!categoriaId || subsFiltradas.length === 0}
+          >
             <SelectTrigger><SelectValue placeholder={categoriaId ? "Selecciona…" : "Elige categoría primero"} /></SelectTrigger>
             <SelectContent>
               {subsFiltradas.map((s) => <SelectItem key={s.id} value={s.id}>{s.nombre}</SelectItem>)}

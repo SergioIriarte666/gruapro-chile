@@ -3,24 +3,21 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { LogOut, Truck } from "lucide-react";
 import { toast } from "sonner";
+import { useServerFn as useTanstackServerFn } from "@tanstack/react-start";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
 import { formatCLP, formatDateTime } from "@/lib/format";
-
-const ESTADOS = ["pendiente", "en_curso", "completado", "cancelado"] as const;
+import {
+  anularOrden,
+  cambiarEstadoOrden,
+  completarOrden,
+} from "@/lib/ordenes.functions";
 
 function useMiOperador(userId: string | undefined) {
   return useQuery({
@@ -86,19 +83,49 @@ export function OperadorLayout({ children: _ }: { children: ReactNode }) {
   const { data: ordenes = [] } = useMisOrdenesHoy(operador?.id);
   const { data: comisiones = [] } = useMisComisionesMes(operador?.id);
 
-  const updateEstado = useMutation({
-    mutationFn: async ({ id, estado }: { id: string; estado: string }) => {
-      const { error } = await supabase
-        .from("ordenes_servicio")
-        .update({ estado })
-        .eq("id", id);
-      if (error) throw error;
+  const completarFn = useTanstackServerFn(completarOrden);
+  const anularFn = useTanstackServerFn(anularOrden);
+  const cambiarFn = useTanstackServerFn(cambiarEstadoOrden);
+
+  const iniciarMut = useMutation({
+    mutationFn: async ({ ordenId }: { ordenId: string }) => {
+      await cambiarFn({ data: { ordenId, estado: "en_curso" } });
     },
     onSuccess: () => {
-      toast.success("Estado actualizado");
+      toast.success("Servicio iniciado");
       queryClient.invalidateQueries({ queryKey: ["mis-ordenes-hoy"] });
+      queryClient.invalidateQueries({ queryKey: ["ordenes"] });
     },
-    onError: (e: any) => toast.error("No se pudo actualizar", { description: e.message }),
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const completarMut = useMutation({
+    mutationFn: async ({ ordenId }: { ordenId: string }) => {
+      return completarFn({ data: { ordenId } });
+    },
+    onSuccess: (res) => {
+      toast.success(
+        res?.comisionCreada
+          ? `Servicio completado. Comisión: ${formatCLP(res.monto)}`
+          : "Servicio completado",
+      );
+      queryClient.invalidateQueries({ queryKey: ["mis-ordenes-hoy"] });
+      queryClient.invalidateQueries({ queryKey: ["mis-comisiones-mes"] });
+      queryClient.invalidateQueries({ queryKey: ["ordenes"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const anularMut = useMutation({
+    mutationFn: async ({ ordenId }: { ordenId: string }) => {
+      await anularFn({ data: { ordenId } });
+    },
+    onSuccess: () => {
+      toast.success("Orden anulada");
+      queryClient.invalidateQueries({ queryKey: ["mis-ordenes-hoy"] });
+      queryClient.invalidateQueries({ queryKey: ["ordenes"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const totalPendiente = comisiones
@@ -168,23 +195,36 @@ export function OperadorLayout({ children: _ }: { children: ReactNode }) {
                           </p>
                         </div>
                         <Badge variant="outline">{o.estado}</Badge>
-                        <Select
-                          value={o.estado}
-                          onValueChange={(estado) =>
-                            updateEstado.mutate({ id: o.id, estado })
-                          }
-                        >
-                          <SelectTrigger className="h-8 w-[150px]">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {ESTADOS.map((e) => (
-                              <SelectItem key={e} value={e}>
-                                {e.replace("_", " ")}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <div className="flex gap-2">
+                          {o.estado === "pendiente" && (
+                            <Button
+                              size="sm"
+                              onClick={() => iniciarMut.mutate({ ordenId: o.id })}
+                              disabled={iniciarMut.isPending}
+                            >
+                              Iniciar
+                            </Button>
+                          )}
+                          {o.estado === "en_curso" && (
+                            <Button
+                              size="sm"
+                              onClick={() => completarMut.mutate({ ordenId: o.id })}
+                              disabled={completarMut.isPending}
+                            >
+                              Completar
+                            </Button>
+                          )}
+                          {o.estado !== "anulado" && o.estado !== "facturado" && (
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => anularMut.mutate({ ordenId: o.id })}
+                              disabled={anularMut.isPending}
+                            >
+                              Anular
+                            </Button>
+                          )}
+                        </div>
                       </li>
                     ))}
                   </ul>

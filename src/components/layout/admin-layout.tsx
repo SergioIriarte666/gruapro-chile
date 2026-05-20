@@ -14,6 +14,7 @@ import {
   Wallet,
   Boxes,
   Settings,
+  FileUp,
   Bell,
   LogOut,
   ChevronDown,
@@ -74,6 +75,7 @@ const FINANZAS: NavItem[] = [
 ];
 
 const SISTEMA: NavItem[] = [
+  { to: "/importar", label: "Importadores", icon: FileUp, roles: ["admin", "contador"] },
   { to: "/configuracion", label: "Configuración", icon: Settings, roles: ["admin"] },
 ];
 
@@ -89,6 +91,7 @@ const TITLES: Record<string, string> = {
   "/bodega": "Bodega",
   "/cierres": "Cierres de período",
   "/costos": "Costos",
+  "/importar": "Importadores",
   "/configuracion": "Configuración",
 };
 

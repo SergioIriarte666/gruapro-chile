@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Eye, Plus } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, Eye, Pencil, Plus } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -33,6 +33,8 @@ import {
 } from "@/components/ui/dialog";
 import { formatCLP, formatDateTime } from "@/lib/format";
 import type { Tables } from "@/integrations/supabase/types";
+import { ClienteForm } from "@/components/clientes/cliente-form";
+import { parseEmailsCierre, type ClienteFormValues } from "@/lib/clientes-schema";
 
 type Cliente = Tables<"clientes">;
 type VehiculoCatalogo = Tables<"vehiculos_catalogo">;
@@ -47,6 +49,7 @@ function ClienteDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [openNuevaOrden, setOpenNuevaOrden] = useState(false);
+  const [openEdit, setOpenEdit] = useState(false);
 
   const { data: cliente, isLoading } = useQuery({
     queryKey: ["clientes", clienteId],
@@ -79,7 +82,7 @@ function ClienteDetailPage() {
           .from("ordenes_servicio")
           .select("id", { count: "exact", head: true })
           .eq("cliente_id", clienteId)
-          .in("estado", ["pendiente", "asignado", "en_curso"]),
+          .in("estado", ["pendiente", "en_curso"]),
         supabase
           .from("clientes_vehiculos")
           .select("id", { count: "exact", head: true })
@@ -178,6 +181,55 @@ function ClienteDetailPage() {
     };
   }, [clienteId, queryClient]);
 
+  const updateMutation = useMutation({
+    mutationFn: async (values: ClienteFormValues) => {
+      const { data: before, error: beforeErr } = await supabase
+        .from("clientes")
+        .select("*")
+        .eq("id", clienteId)
+        .single();
+      if (beforeErr) throw beforeErr;
+
+      const payload = {
+        nombre: values.nombre.trim(),
+        rut: values.rut?.trim() || null,
+        tipo: values.tipo,
+        email: values.email?.trim() || null,
+        telefono: values.telefono?.trim() || null,
+        direccion: values.direccion?.trim() || null,
+        condicion_pago: Number(values.condicion_pago ?? 0),
+        requiere_folio: values.requiere_folio,
+        periodo_cierre: values.periodo_cierre,
+        iva_incluido: values.iva_incluido,
+        emails_cierre: parseEmailsCierre(values.emails_cierre ?? ""),
+        observaciones: values.observaciones?.trim() || null,
+      };
+
+      const { error } = await supabase
+        .from("clientes")
+        .update(payload)
+        .eq("id", clienteId);
+      if (error) throw error;
+
+      const { error: histErr } = await (supabase as any)
+        .from("service_change_history")
+        .insert({
+          entity_type: "cliente",
+          entity_id: clienteId,
+          action: "updated",
+          old_value: before,
+          new_value: payload,
+        });
+      if (histErr) throw new Error(histErr.message);
+    },
+    onSuccess: () => {
+      setOpenEdit(false);
+      queryClient.invalidateQueries({ queryKey: ["clientes"] });
+      queryClient.invalidateQueries({ queryKey: ["clientes", clienteId] });
+      queryClient.invalidateQueries({ queryKey: ["clientes", clienteId, "resumen"] });
+    },
+  });
+
   if (isLoading) {
     return <div className="text-muted-foreground">Cargando cliente...</div>;
   }
@@ -202,9 +254,14 @@ function ClienteDetailPage() {
             {cliente.tipo ?? "—"}
           </Badge>
         </div>
-        <Button onClick={() => setOpenNuevaOrden(true)}>
-          <Plus /> Nueva orden
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setOpenEdit(true)}>
+            <Pencil /> Editar
+          </Button>
+          <Button onClick={() => setOpenNuevaOrden(true)}>
+            <Plus /> Nueva orden
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -225,7 +282,7 @@ function ClienteDetailPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-semibold">{resumen?.serviciosEnCurso ?? "—"}</div>
-            <div className="text-xs text-muted-foreground">Pendiente / asignado / en curso</div>
+            <div className="text-xs text-muted-foreground">Pendiente / en curso</div>
           </CardContent>
         </Card>
         <Card>
@@ -292,6 +349,41 @@ function ClienteDetailPage() {
             onCreated={(id) => {
               setOpenNuevaOrden(false);
               navigate({ to: "/ordenes/$ordenId", params: { ordenId: id } });
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={openEdit} onOpenChange={setOpenEdit}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Editar cliente</DialogTitle>
+            <DialogDescription>{cliente.nombre}</DialogDescription>
+          </DialogHeader>
+          <ClienteForm
+            defaultValues={{
+              nombre: cliente.nombre,
+              rut: cliente.rut ?? "",
+              tipo: (cliente.tipo as ClienteFormValues["tipo"]) ?? "empresa",
+              email: cliente.email ?? "",
+              telefono: cliente.telefono ?? "",
+              direccion: cliente.direccion ?? "",
+              condicion_pago: Number(cliente.condicion_pago ?? 0),
+              requiere_folio: Boolean(cliente.requiere_folio),
+              periodo_cierre: (cliente.periodo_cierre as ClienteFormValues["periodo_cierre"]) ?? "mensual",
+              iva_incluido: Boolean(cliente.iva_incluido),
+              emails_cierre: (cliente.emails_cierre ?? []).join("\n"),
+              observaciones: cliente.observaciones ?? "",
+            }}
+            onCancel={() => setOpenEdit(false)}
+            isSubmitting={updateMutation.isPending}
+            submitLabel="Guardar cambios"
+            onSubmit={async (values) => {
+              try {
+                await updateMutation.mutateAsync(values);
+              } catch (error) {
+                throw error;
+              }
             }}
           />
         </DialogContent>
@@ -450,7 +542,7 @@ function estadoVariant(
     case "facturado":
     case "pagado":
       return "default";
-    case "cancelado":
+    case "anulado":
       return "destructive";
     case "en_curso":
       return "secondary";

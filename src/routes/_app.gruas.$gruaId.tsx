@@ -115,7 +115,7 @@ function GruaDetailPage() {
           .from("ordenes_servicio")
           .select("id", { count: "exact", head: true })
           .eq("grua_id", gruaId)
-          .in("estado", ["pendiente", "asignado", "en_curso"]);
+          .in("estado", ["pendiente", "en_curso"]);
         if (activeErr) throw activeErr;
         if ((count ?? 0) > 0) {
           throw new Error("No se puede dar de baja una grúa con órdenes activas");

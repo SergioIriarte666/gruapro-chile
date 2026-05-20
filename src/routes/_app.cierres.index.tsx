@@ -7,6 +7,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
   TableBody,
@@ -41,6 +42,7 @@ type CierreRow = {
   folio_cliente: string | null;
   cliente_id: string;
   created_at: string | null;
+  updated_at: string | null;
   clientes: { nombre: string; requiere_folio: boolean | null } | null;
 };
 
@@ -110,6 +112,26 @@ function CierresIndex() {
     });
   }, [cierres, estado, clienteFilter, mes, search]);
 
+  const resumen = useMemo(() => {
+    const count = (v: string) => cierres.filter((c) => c.estado === v).length;
+    const porFacturar = cierres
+      .filter((c) => (c.estado ?? "") === "enviado" || (c.estado ?? "") === "con_folio")
+      .reduce((s, c) => s + Number(c.total ?? 0), 0);
+    return {
+      abiertos: count("abierto"),
+      enviados: count("enviado"),
+      conFolio: count("con_folio"),
+      facturados: count("facturado"),
+      pagados: count("pagado"),
+      porFacturar,
+    };
+  }, [cierres]);
+
+  const seteDiasAtras = useMemo(
+    () => new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+    [],
+  );
+
   // Opciones de mes (últimos 12)
   const mesesOpts = useMemo(() => {
     const set = new Set<string>();
@@ -131,6 +153,49 @@ function CierresIndex() {
         </Button>
       </div>
 
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-xs text-muted-foreground">Abiertos</div>
+            <div className="text-xl font-semibold">{resumen.abiertos}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-xs text-muted-foreground">Enviados</div>
+            <div className="text-xl font-semibold">{resumen.enviados}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-xs text-muted-foreground">Con folio</div>
+            <div className="text-xl font-semibold">{resumen.conFolio}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-xs text-muted-foreground">Facturados</div>
+            <div className="text-xl font-semibold">{resumen.facturados}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-xs text-muted-foreground">Por facturar</div>
+            <div className="text-xl font-semibold">{formatCLP(resumen.porFacturar)}</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Tabs value={estado} onValueChange={setEstado}>
+        <TabsList className="flex flex-wrap">
+          <TabsTrigger value="all">Todos</TabsTrigger>
+          <TabsTrigger value="abierto">Abiertos</TabsTrigger>
+          <TabsTrigger value="enviado">Enviados</TabsTrigger>
+          <TabsTrigger value="con_folio">Con folio</TabsTrigger>
+          <TabsTrigger value="facturado">Facturados</TabsTrigger>
+          <TabsTrigger value="pagado">Pagados</TabsTrigger>
+        </TabsList>
+        <TabsContent value={estado} className="space-y-6">
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Filtros</CardTitle>
@@ -145,19 +210,7 @@ function CierresIndex() {
               className="pl-8"
             />
           </div>
-          <Select value={estado} onValueChange={setEstado}>
-            <SelectTrigger>
-              <SelectValue placeholder="Estado" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos los estados</SelectItem>
-              {ESTADO_CIERRE_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value}>
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="hidden" />
           <Select value={clienteFilter} onValueChange={setClienteFilter}>
             <SelectTrigger>
               <SelectValue placeholder="Cliente" />
@@ -234,8 +287,30 @@ function CierresIndex() {
                     <TableCell className="text-right">{formatCLP(c.total)}</TableCell>
                     <TableCell>{c.folio_cliente ?? "—"}</TableCell>
                     <TableCell>
-                      <Badge variant={estadoCierreVariant(c.estado)}>
+                      <Badge
+                        variant={estadoCierreVariant(c.estado)}
+                        className={
+                          c.estado === "abierto"
+                            ? "bg-amber-500 text-white hover:bg-amber-500"
+                            : c.estado === "enviado"
+                              ? "bg-sky-600 text-white hover:bg-sky-600"
+                              : c.estado === "con_folio"
+                                ? "bg-orange-600 text-white hover:bg-orange-600"
+                                : c.estado === "facturado"
+                                  ? "bg-teal-600 text-white hover:bg-teal-600"
+                                  : c.estado === "pagado"
+                                    ? "bg-emerald-600 text-white hover:bg-emerald-600"
+                                    : c.estado === "anulado"
+                                      ? "bg-zinc-500 text-white hover:bg-zinc-500"
+                                      : undefined
+                        }
+                      >
                         {estadoCierreLabel(c.estado)}
+                        {c.estado === "enviado" &&
+                          c.updated_at &&
+                          c.updated_at < seteDiasAtras && (
+                            <span className="ml-2 inline-block h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+                          )}
                       </Badge>
                     </TableCell>
                     <TableCell>
@@ -254,6 +329,8 @@ function CierresIndex() {
       </Card>
 
       <NuevoCierreDialog open={nuevoOpen} onOpenChange={setNuevoOpen} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

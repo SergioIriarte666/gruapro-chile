@@ -13,6 +13,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Tabs,
   TabsContent,
@@ -45,6 +48,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { ChangeHistoryPanel } from "@/components/shared/change-history-panel";
 import { formatCLP, formatDate, formatDateTime } from "@/lib/format";
 import { estadoOrdenVariant } from "@/lib/ordenes-options";
 import {
@@ -52,6 +56,7 @@ import {
   cambiarEstadoOrden,
   completarOrden,
 } from "@/lib/ordenes.functions";
+import { createCostoSchema } from "@/lib/validations/costos";
 
 function OrdenDetailPage() {
   const { ordenId } = Route.useParams();
@@ -103,10 +108,9 @@ function OrdenDetailPage() {
   });
 
   const cambiarMut = useMutation({
-    mutationFn: (estado: "pendiente" | "asignado" | "en_curso") =>
-      cambiarFn({ data: { ordenId, estado } }),
+    mutationFn: () => cambiarFn({ data: { ordenId, estado: "en_curso" } }),
     onSuccess: () => {
-      toast.success("Estado actualizado");
+      toast.success("Servicio iniciado");
       queryClient.invalidateQueries({ queryKey: ["ordenes"] });
       queryClient.invalidateQueries({ queryKey: ["ordenes", ordenId] });
     },
@@ -120,7 +124,9 @@ function OrdenDetailPage() {
     return <div className="text-muted-foreground">Orden no encontrada.</div>;
   }
 
-  const isFinal = orden.estado === "completado" || orden.estado === "anulado";
+  const canIniciar = orden.estado === "pendiente";
+  const canCompletar = orden.estado === "en_curso";
+  const canAnular = orden.estado !== "anulado" && orden.estado !== "facturado";
 
   return (
     <div className="space-y-4">
@@ -140,49 +146,45 @@ function OrdenDetailPage() {
           {orden.estado ?? "—"}
         </Badge>
 
-        {!isFinal && (
+        {(canIniciar || canCompletar || canAnular) && (
           <div className="flex gap-2">
-            <Select
-              value=""
-              onValueChange={(v) =>
-                cambiarMut.mutate(v as "pendiente" | "asignado" | "en_curso")
-              }
-            >
-              <SelectTrigger className="w-44">
-                <SelectValue placeholder="Cambiar estado" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="pendiente">Pendiente</SelectItem>
-                <SelectItem value="asignado">Asignado</SelectItem>
-                <SelectItem value="en_curso">En curso</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button
-              onClick={() => completarMut.mutate()}
-              disabled={completarMut.isPending}
-            >
-              {completarMut.isPending && <Loader2 className="animate-spin" />}
-              Marcar completada
-            </Button>
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="destructive">Anular</Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>¿Anular orden?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    Se eliminará la comisión pendiente asociada (si existe).
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                  <AlertDialogAction onClick={() => anularMut.mutate()}>
+            {canIniciar && (
+              <Button onClick={() => cambiarMut.mutate()} disabled={cambiarMut.isPending}>
+                {cambiarMut.isPending && <Loader2 className="animate-spin" />}
+                Iniciar servicio
+              </Button>
+            )}
+            {canCompletar && (
+              <Button onClick={() => completarMut.mutate()} disabled={completarMut.isPending}>
+                {completarMut.isPending && <Loader2 className="animate-spin" />}
+                Completar servicio
+              </Button>
+            )}
+            {canAnular && (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive" disabled={anularMut.isPending}>
+                    {anularMut.isPending && <Loader2 className="animate-spin" />}
                     Anular
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>¿Anular orden?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      No se puede anular si está incluida en un cierre activo. Si tiene comisión
+                      pendiente, el trigger la elimina automáticamente.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => anularMut.mutate()}>
+                      Anular
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
           </div>
         )}
       </div>
@@ -193,6 +195,7 @@ function OrdenDetailPage() {
           <TabsTrigger value="costos">Costos asociados</TabsTrigger>
           <TabsTrigger value="comision">Comisión</TabsTrigger>
           <TabsTrigger value="cierre">Cierre</TabsTrigger>
+          <TabsTrigger value="historial">Historial</TabsTrigger>
         </TabsList>
 
         <TabsContent value="datos">
@@ -202,13 +205,20 @@ function OrdenDetailPage() {
           </div>
         </TabsContent>
         <TabsContent value="costos">
-          <CostosTab ordenId={ordenId} />
+          <CostosTab
+            ordenId={ordenId}
+            montoServicio={Number((orden as any).monto ?? 0)}
+            gruaId={(orden as any).grua_id ?? null}
+          />
         </TabsContent>
         <TabsContent value="comision">
           <ComisionTab ordenId={ordenId} />
         </TabsContent>
         <TabsContent value="cierre">
           <CierreTab ordenId={ordenId} />
+        </TabsContent>
+        <TabsContent value="historial">
+          <ChangeHistoryPanel entityType="orden" entityId={ordenId} />
         </TabsContent>
       </Tabs>
     </div>
@@ -348,58 +358,267 @@ function FotosTab({ ordenId, fotos }: { ordenId: string; fotos: string[] }) {
   );
 }
 
-function CostosTab({ ordenId }: { ordenId: string }) {
+function CostosTab({
+  ordenId,
+  montoServicio,
+  gruaId,
+}: {
+  ordenId: string;
+  montoServicio: number;
+  gruaId: string | null;
+}) {
+  const queryClient = useQueryClient();
+  const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10));
+  const [categoriaId, setCategoriaId] = useState("");
+  const [subcategoriaId, setSubcategoriaId] = useState("");
+  const [monto, setMonto] = useState("");
+  const [medio, setMedio] = useState("transferencia");
+  const [numDoc, setNumDoc] = useState("");
+  const [descripcion, setDescripcion] = useState("");
+
+  const { data: categorias = [] } = useQuery({
+    queryKey: ["categorias-costo"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("categorias_costo")
+        .select("*")
+        .eq("activa", true)
+        .order("nombre");
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const { data: subcategorias = [] } = useQuery({
+    queryKey: ["subcategorias-costo"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("subcategorias_costo")
+        .select("*")
+        .eq("activa", true)
+        .order("nombre");
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const subsFiltradas = subcategorias.filter(
+    (s: any) =>
+      s.categoria_id === categoriaId && (!s.aplica_a || s.aplica_a === "ambos" || s.aplica_a === "servicio"),
+  );
+
   const { data: costos = [], isLoading } = useQuery({
     queryKey: ["ordenes", ordenId, "costos"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("costos")
-        .select("*")
+        .select(
+          "id,fecha,monto,medio_pago,numero_documento,descripcion, categorias_costo(nombre), subcategorias_costo(nombre)",
+        )
         .eq("orden_id", ordenId)
         .order("fecha", { ascending: false });
       if (error) throw error;
       return data ?? [];
     },
   });
-  const total = costos.reduce((acc, c) => acc + Number(c.monto ?? 0), 0);
+
+  const total = costos.reduce((acc: number, c: any) => acc + Number(c.monto ?? 0), 0);
+  const margen = Number(montoServicio ?? 0) - total;
+
+  const addCosto = useMutation({
+    mutationFn: async () => {
+      const result = createCostoSchema.safeParse({
+        fecha,
+        categoria_id: categoriaId,
+        subcategoria_id: subcategoriaId,
+        monto,
+        medio_pago: (medio || undefined) as any,
+        tipo: "servicio",
+        orden_id: ordenId,
+        grua_id: gruaId ?? undefined,
+        numero_documento: numDoc || undefined,
+        descripcion: descripcion || undefined,
+      });
+      if (!result.success) {
+        throw new Error(result.error.issues[0]?.message ?? "Revisa los campos obligatorios");
+      }
+      const parsed = result.data;
+
+      const { error } = await supabase.from("costos").insert({
+        fecha: parsed.fecha,
+        tipo: "servicio",
+        orden_id: ordenId,
+        grua_id: parsed.grua_id ?? null,
+        categoria_id: parsed.categoria_id,
+        subcategoria_id: parsed.subcategoria_id,
+        monto: Number(parsed.monto),
+        medio_pago: parsed.medio_pago ?? null,
+        numero_documento: parsed.numero_documento ?? null,
+        descripcion: parsed.descripcion ?? null,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Costo agregado");
+      setCategoriaId("");
+      setSubcategoriaId("");
+      setMonto("");
+      setNumDoc("");
+      setDescripcion("");
+      queryClient.invalidateQueries({ queryKey: ["ordenes", ordenId, "costos"] });
+      queryClient.invalidateQueries({ queryKey: ["ordenes", ordenId] });
+      queryClient.invalidateQueries({ queryKey: ["costos"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>Costos asociados</CardTitle>
-        <div className="text-right">
-          <div className="text-xs text-muted-foreground uppercase">Total</div>
-          <div className="text-lg font-semibold">{formatCLP(total)}</div>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Fecha</TableHead>
-              <TableHead>Tipo</TableHead>
-              <TableHead>Descripción</TableHead>
-              <TableHead>Documento</TableHead>
-              <TableHead className="text-right">Monto</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading ? (
-              <TableRow><TableCell colSpan={5} className="text-center py-6 text-muted-foreground">Cargando...</TableCell></TableRow>
-            ) : costos.length === 0 ? (
-              <TableRow><TableCell colSpan={5} className="text-center py-6 text-muted-foreground">Sin costos registrados.</TableCell></TableRow>
-            ) : costos.map((c) => (
-              <TableRow key={c.id}>
-                <TableCell>{formatDate(c.fecha)}</TableCell>
-                <TableCell className="capitalize">{c.tipo ?? "—"}</TableCell>
-                <TableCell className="text-muted-foreground">{c.descripcion ?? "—"}</TableCell>
-                <TableCell>{c.numero_documento ?? "—"}</TableCell>
-                <TableCell className="text-right">{formatCLP(c.monto)}</TableCell>
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <CardTitle>Costos directos</CardTitle>
+          <div className="flex flex-wrap gap-3 text-sm">
+            <div className="text-right">
+              <div className="text-xs text-muted-foreground uppercase">Servicio</div>
+              <div className="font-semibold">{formatCLP(montoServicio)}</div>
+            </div>
+            <div className="text-right">
+              <div className="text-xs text-muted-foreground uppercase">Costos</div>
+              <div className="font-semibold text-destructive">{formatCLP(total)}</div>
+            </div>
+            <div className="text-right">
+              <div className="text-xs text-muted-foreground uppercase">Margen</div>
+              <div className={`font-semibold ${margen >= 0 ? "text-emerald-600" : "text-destructive"}`}>
+                {formatCLP(margen)}
+              </div>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 md:grid-cols-6 gap-3">
+          <div className="md:col-span-1">
+            <Label className="text-xs">Fecha *</Label>
+            <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+          </div>
+          <div className="md:col-span-2">
+            <Label className="text-xs">Categoría *</Label>
+            <Select value={categoriaId} onValueChange={setCategoriaId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecciona…" />
+              </SelectTrigger>
+              <SelectContent>
+                {categorias
+                  .filter((c: any) => !c.tipo || c.tipo === "servicio" || c.tipo === "ambos")
+                  .map((c: any) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.nombre}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="md:col-span-2">
+            <Label className="text-xs">Subcategoría *</Label>
+            <Select
+              value={subcategoriaId}
+              onValueChange={setSubcategoriaId}
+              disabled={!categoriaId || subsFiltradas.length === 0}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder={categoriaId ? "Selecciona…" : "Elige categoría primero"} />
+              </SelectTrigger>
+              <SelectContent>
+                {subsFiltradas.map((s: any) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.nombre}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="md:col-span-1">
+            <Label className="text-xs">Monto *</Label>
+            <Input type="number" value={monto} onChange={(e) => setMonto(e.target.value)} placeholder="0" />
+          </div>
+          <div className="md:col-span-2">
+            <Label className="text-xs">Medio de pago</Label>
+            <Select value={medio} onValueChange={setMedio}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="transferencia">Transferencia</SelectItem>
+                <SelectItem value="efectivo">Efectivo</SelectItem>
+                <SelectItem value="tarjeta">Tarjeta</SelectItem>
+                <SelectItem value="cheque">Cheque</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="md:col-span-2">
+            <Label className="text-xs">N° documento</Label>
+            <Input value={numDoc} onChange={(e) => setNumDoc(e.target.value)} placeholder="Boleta/factura" />
+          </div>
+          <div className="md:col-span-6">
+            <Label className="text-xs">Descripción</Label>
+            <Textarea value={descripcion} onChange={(e) => setDescripcion(e.target.value)} rows={2} />
+          </div>
+          <div className="md:col-span-6 flex justify-end">
+            <Button onClick={() => addCosto.mutate()} disabled={addCosto.isPending}>
+              {addCosto.isPending && <Loader2 className="animate-spin" />}
+              Agregar costo
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>Costos registrados</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Fecha</TableHead>
+                <TableHead>Categoría</TableHead>
+                <TableHead>Descripción</TableHead>
+                <TableHead>Doc.</TableHead>
+                <TableHead className="text-right">Monto</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
+            </TableHeader>
+            <TableBody>
+              {isLoading ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center py-6 text-muted-foreground">
+                    Cargando...
+                  </TableCell>
+                </TableRow>
+              ) : costos.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center py-6 text-muted-foreground">
+                    Sin costos registrados.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                costos.map((c: any) => (
+                  <TableRow key={c.id}>
+                    <TableCell>{formatDate(c.fecha)}</TableCell>
+                    <TableCell>
+                      {(c.categorias_costo?.nombre ?? "—") +
+                        (c.subcategorias_costo?.nombre
+                          ? ` → ${c.subcategorias_costo.nombre}`
+                          : "")}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{c.descripcion ?? "—"}</TableCell>
+                    <TableCell>{c.numero_documento ?? "—"}</TableCell>
+                    <TableCell className="text-right">{formatCLP(c.monto)}</TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 

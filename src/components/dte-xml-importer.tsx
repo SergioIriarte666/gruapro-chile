@@ -160,7 +160,9 @@ export function DteXmlImporter({ categorias, subcategorias, invalidateKeys = [] 
         provId = nuevo.id;
       }
 
-      const { error } = await supabase.from("costos").insert({
+      const { data: costo, error } = await supabase
+        .from("costos")
+        .insert({
         proveedor_id: provId,
         numero_documento: data.folio.valor,
         fecha: data.fecha.valor,
@@ -172,8 +174,24 @@ export function DteXmlImporter({ categorias, subcategorias, invalidateKeys = [] 
         descripcion: data.nombre_emisor.valor
           ? `DTE ${data.tipo_dte.valor ?? ""} · ${data.nombre_emisor.valor}`
           : null,
-      });
+        })
+        .select("id")
+        .single();
       if (error) throw error;
+
+      const { error: histErr } = await (supabase as any).from("service_change_history").insert({
+        entity_type: "costo",
+        entity_id: (costo as any).id,
+        action: "dte_imported",
+        new_value: {
+          proveedor_rut: data.rut_emisor.valor,
+          folio: data.folio.valor,
+          fecha: data.fecha.valor,
+          monto,
+          archivo_url: storageUrl,
+        },
+      });
+      if (histErr) throw new Error(histErr.message);
 
       toast.success("Costo importado desde DTE");
       invalidateKeys.forEach((k) => qc.invalidateQueries({ queryKey: k }));

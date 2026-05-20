@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/table";
 import { formatCLP, formatDate } from "@/lib/format";
 import { calcTotales } from "@/lib/cierres-options";
+import { createCierreSchema } from "@/lib/validations/cierres";
 
 interface Props {
   open: boolean;
@@ -61,6 +62,21 @@ const firstOfMonth = () => {
   const d = new Date();
   return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
 };
+
+async function generarNumeroCierre(): Promise<string> {
+  const { data: last, error } = await supabase
+    .from("cierres")
+    .select("numero")
+    .ilike("numero", "CIE-%")
+    .order("numero", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  const lastNum = (last as any)?.numero as string | null | undefined;
+  const m = lastNum?.match(/(\d+)\s*$/);
+  const next = (m ? Number(m[1]) : 0) + 1;
+  return `CIE-${String(next).padStart(4, "0")}`;
+}
 
 export function NuevoCierreDialog({ open, onOpenChange }: Props) {
   const navigate = useNavigate();
@@ -137,34 +153,75 @@ export function NuevoCierreDialog({ open, onOpenChange }: Props) {
 
   const crear = useMutation({
     mutationFn: async () => {
-      if (!clienteId) throw new Error("Selecciona un cliente");
+      const parsed = createCierreSchema.safeParse({
+        cliente_id: clienteId,
+        periodo_inicio: fechaInicio,
+        periodo_fin: fechaFin,
+      });
+      if (!parsed.success) {
+        throw new Error(parsed.error.issues[0]?.message ?? "Revisa los campos");
+      }
       if (seleccionadosArr.length === 0) throw new Error("Selecciona al menos un servicio");
 
-      const numero = `C-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
-      const { data: cierre, error } = await supabase
-        .from("cierres")
-        .insert({
-          numero,
-          cliente_id: clienteId,
-          periodo_inicio: fechaInicio,
-          periodo_fin: fechaFin,
-          subtotal: totales.subtotal,
-          iva: totales.iva,
-          total: totales.total,
-          estado: "abierto",
-        })
-        .select("id")
-        .single();
-      if (error) throw error;
+      let numero = "";
+      let cierreId = "";
+      for (let attempt = 0; attempt < 3; attempt++) {
+        numero = await generarNumeroCierre();
+        const { data: cierre, error } = await supabase
+          .from("cierres")
+          .insert({
+            numero,
+            cliente_id: clienteId,
+            periodo_inicio: fechaInicio,
+            periodo_fin: fechaFin,
+            subtotal: totales.subtotal,
+            iva: totales.iva,
+            total: totales.total,
+            estado: "abierto",
+          })
+          .select("id")
+          .single();
+        if (error) {
+          if ((error as any).code === "23505") continue;
+          throw error;
+        }
+        cierreId = (cierre as any).id as string;
+        break;
+      }
+      if (!cierreId) throw new Error("No se pudo generar el número del cierre");
 
       const filas = seleccionadosArr.map((s) => ({
-        cierre_id: cierre.id,
+        cierre_id: cierreId,
         orden_id: s.id,
         monto_aplicado: Number(s.monto ?? 0),
       }));
       const { error: errIns } = await supabase.from("cierre_servicios").insert(filas);
-      if (errIns) throw errIns;
-      return cierre.id as string;
+      if (errIns) {
+        await supabase.from("cierres").delete().eq("id", cierreId);
+        if ((errIns as any).code === "23505") {
+          throw new Error("Uno de los servicios ya está incluido en otro cierre activo");
+        }
+        throw errIns;
+      }
+
+      const { error: histErr } = await (supabase as any).from("service_change_history").insert({
+        entity_type: "cierre",
+        entity_id: cierreId,
+        action: "created",
+        new_value: {
+          numero,
+          cliente_id: clienteId,
+          periodo_inicio: fechaInicio,
+          periodo_fin: fechaFin,
+          servicios: seleccionadosArr.length,
+          subtotal: totales.subtotal,
+          iva: totales.iva,
+          total: totales.total,
+        },
+      });
+      if (histErr) throw new Error(histErr.message);
+
+      return cierreId;
     },
     onSuccess: (id) => {
       toast.success("Cierre creado");
@@ -222,6 +279,33 @@ export function NuevoCierreDialog({ open, onOpenChange }: Props) {
 
         {clienteId && (
           <div className="border rounded-md mt-4">
+            <div className="flex items-center justify-between p-3 border-b">
+              <div className="text-sm text-muted-foreground">
+                Servicios disponibles: <span className="text-foreground font-medium">{servicios.length}</span>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const map: Record<string, boolean> = {};
+                    for (const s of servicios) map[s.id] = true;
+                    setSeleccionados(map);
+                  }}
+                  disabled={servicios.length === 0}
+                >
+                  Seleccionar todo
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSeleccionados({})}
+                  disabled={servicios.length === 0}
+                >
+                  Deseleccionar
+                </Button>
+              </div>
+            </div>
             <Table>
               <TableHeader>
                 <TableRow>

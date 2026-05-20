@@ -227,7 +227,7 @@ function ClientesPage() {
         .from("ordenes_servicio")
         .select("id", { count: "exact", head: true })
         .eq("cliente_id", id)
-        .neq("estado", "anulado");
+        .in("estado", ["pendiente", "en_curso"]);
       if (countErr) throw countErr;
       if ((count ?? 0) > 0) {
         throw new Error("No se puede eliminar un cliente con servicios activos");

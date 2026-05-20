@@ -29,12 +29,12 @@ export interface ImportConfig {
   loadDynamicEnums?: () => Promise<Record<string, string[]>>;
 }
 
-const FORMA_PAGO = ["efectivo", "transferencia", "tarjeta", "credito", "convenio"];
-const TIPO_SERVICIO = ["traslado", "auxilio", "remolque", "rescate", "siniestro", "otro"];
-const ESTADO_ORDEN = ["pendiente", "asignado", "en_curso", "completado", "anulado"];
-const MEDIO_PAGO = ["transferencia", "efectivo", "tarjeta", "cheque", "credito"];
+const FORMA_PAGO = ["efectivo", "transferencia", "credito", "aseguradora"];
+const TIPO_SERVICIO = ["remolque_local", "larga_distancia", "izaje", "rescate", "traslado"];
+const ESTADO_ORDEN = ["pendiente", "en_curso", "completado", "anulado"];
+const MEDIO_PAGO = ["transferencia", "efectivo", "tarjeta", "cheque"];
 const TIPO_COSTO = ["servicio", "operacional"];
-const TIPO_CLIENTE = ["persona", "empresa", "aseguradora"];
+const TIPO_CLIENTE = ["persona_natural", "empresa", "aseguradora"];
 
 export const IMPORT_CONFIGS: Record<string, ImportConfig> = {
   servicios: {
@@ -142,21 +142,22 @@ export const IMPORT_CONFIGS: Record<string, ImportConfig> = {
     label: "Bodega — Items",
     table: "bodega_items",
     columns: [
-      { key: "nombre", required: true, type: "string", example: "Cable de acero 8mm" },
+      { key: "nombre_item", required: true, type: "string", example: "Cable de acero 8mm" },
+      { key: "categoria", required: true, type: "string", example: "Repuestos",
+        lookup: { table: "subcategorias_costo", matchField: "nombre" } },
+      { key: "cantidad", required: true, type: "number", example: 10 },
+      { key: "precio_costo", required: true, type: "number", example: 12000 },
       { key: "unidad", type: "string", example: "unidad" },
-      { key: "ubicacion", type: "string", example: "Bodega A — Estante 3" },
-      { key: "precio_costo", type: "number", example: 12000 },
-      { key: "stock_actual", type: "number", example: 10 },
       { key: "stock_minimo", type: "number", example: 2 },
       { key: "proveedor_rut", type: "string", example: "77.000.000-0",
         lookup: { table: "proveedores", matchField: "rut" } },
     ],
     buildRow: (r) => ({
-      nombre: r.nombre,
-      unidad: r.unidad ?? "unidad",
-      ubicacion: r.ubicacion ?? null,
+      nombre: r.nombre_item,
+      subcategoria_id: r.categoria,
+      cantidad: r.cantidad,
       precio_costo: r.precio_costo ?? 0,
-      stock_actual: r.stock_actual ?? 0,
+      unidad: r.unidad ?? "unidad",
       stock_minimo: r.stock_minimo ?? 0,
       proveedor_id: r.proveedor_rut ?? null,
     }),

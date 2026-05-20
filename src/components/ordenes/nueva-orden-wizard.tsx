@@ -163,7 +163,7 @@ export function NuevaOrdenWizard({ onCancel, onCreated, initialClienteId }: Prop
         folio_cliente: values.folio_cliente || null,
         folio_siniestro: values.folio_siniestro || null,
         observaciones: values.observaciones || null,
-        estado: operadorId ? "asignado" : "pendiente",
+        estado: "pendiente",
       };
       const { data, error } = await supabase
         .from("ordenes_servicio")
@@ -171,6 +171,12 @@ export function NuevaOrdenWizard({ onCancel, onCreated, initialClienteId }: Prop
         .select("id")
         .single();
       if (error) throw error;
+      await (supabase as any).from("service_change_history").insert({
+        entity_type: "orden",
+        entity_id: data.id,
+        action: "created",
+        new_value: payload,
+      });
       return data;
     },
     onSuccess: (data) => {
@@ -182,7 +188,7 @@ export function NuevaOrdenWizard({ onCancel, onCreated, initialClienteId }: Prop
   });
 
   const canNext1 = !!clienteId;
-  const canNext2 = !!gruaId && !!operadorId;
+  const canNext2 = true;
 
   return (
     <div className="space-y-6">
@@ -270,7 +276,7 @@ export function NuevaOrdenWizard({ onCancel, onCreated, initialClienteId }: Prop
       {step === 2 && (
         <div className="space-y-4">
           <div>
-            <Label>Grúa *</Label>
+            <Label>Grúa</Label>
             <Select value={gruaId} onValueChange={setGruaId}>
               <SelectTrigger>
                 <SelectValue placeholder="Selecciona grúa" />
@@ -285,7 +291,7 @@ export function NuevaOrdenWizard({ onCancel, onCreated, initialClienteId }: Prop
             </Select>
           </div>
           <div>
-            <Label>Operador *</Label>
+            <Label>Operador</Label>
             <Select value={operadorId} onValueChange={setOperadorId}>
               <SelectTrigger>
                 <SelectValue placeholder="Selecciona operador" />
