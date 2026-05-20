@@ -4,13 +4,14 @@ import { toast } from "sonner";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { ArrowLeft, ArrowRight, Check, Plus } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { VehiculoSelector } from "@/components/shared/vehiculo-selector";
 import {
   Select,
   SelectContent,
@@ -33,12 +34,6 @@ import {
 import type { Tables } from "@/integrations/supabase/types";
 
 type Cliente = Pick<Tables<"clientes">, "id" | "nombre" | "rut">;
-type ClienteVehiculo = Pick<Tables<"clientes_vehiculos">, "id" | "patente"> & {
-  vehiculos_catalogo: Pick<
-    Tables<"vehiculos_catalogo">,
-    "marca" | "modelo" | "anio"
-  > | null;
-};
 
 const step3Schema = z.object({
   tipo_servicio: z.string().min(1, "Selecciona un tipo"),
@@ -57,14 +52,16 @@ type Step3Values = z.infer<typeof step3Schema>;
 interface Props {
   onCancel: () => void;
   onCreated: (ordenId: string) => void;
+  initialClienteId?: string;
 }
 
-export function NuevaOrdenWizard({ onCancel, onCreated }: Props) {
+export function NuevaOrdenWizard({ onCancel, onCreated, initialClienteId }: Props) {
   const queryClient = useQueryClient();
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
   // Step 1
-  const [clienteId, setClienteId] = useState<string>("");
+  const isClienteLocked = !!initialClienteId;
+  const [clienteId, setClienteId] = useState<string>(initialClienteId ?? "");
   const [clienteVehiculoId, setClienteVehiculoId] = useState<string>("");
   const [clientSearch, setClientSearch] = useState("");
 
@@ -84,7 +81,15 @@ export function NuevaOrdenWizard({ onCancel, onCreated }: Props) {
     },
   });
 
+  const selectedCliente = useMemo(
+    () => clientes.find((c) => c.id === clienteId) ?? null,
+    [clientes, clienteId],
+  );
+
   const filteredClientes = useMemo(() => {
+    if (isClienteLocked) {
+      return clientes.filter((c) => c.id === clienteId);
+    }
     const q = clientSearch.trim().toLowerCase();
     if (!q) return clientes.slice(0, 50);
     return clientes
@@ -95,19 +100,6 @@ export function NuevaOrdenWizard({ onCancel, onCreated }: Props) {
       )
       .slice(0, 50);
   }, [clientes, clientSearch]);
-
-  const { data: vehiculos = [] } = useQuery({
-    queryKey: ["clientes", clienteId, "vehiculos-selector"],
-    enabled: !!clienteId,
-    queryFn: async (): Promise<ClienteVehiculo[]> => {
-      const { data, error } = await supabase
-        .from("clientes_vehiculos")
-        .select("id,patente,vehiculos_catalogo(marca,modelo,anio)")
-        .eq("cliente_id", clienteId);
-      if (error) throw error;
-      return (data ?? []) as ClienteVehiculo[];
-    },
-  });
 
   const { data: gruas = [] } = useQuery({
     queryKey: ["gruas", "activas"],
@@ -217,74 +209,59 @@ export function NuevaOrdenWizard({ onCancel, onCreated }: Props) {
 
       {step === 1 && (
         <div className="space-y-4">
-          <div>
-            <Label>Buscar cliente</Label>
-            <Input
-              value={clientSearch}
-              onChange={(e) => setClientSearch(e.target.value)}
-              placeholder="Nombre o RUT..."
-            />
-          </div>
-          <div>
-            <Label>Cliente *</Label>
-            <Select value={clienteId} onValueChange={setClienteId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Selecciona cliente" />
-              </SelectTrigger>
-              <SelectContent>
-                {filteredClientes.length === 0 ? (
-                  <div className="p-2 text-sm text-muted-foreground">
-                    Sin resultados
-                  </div>
-                ) : (
-                  filteredClientes.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.nombre} {c.rut ? `· ${c.rut}` : ""}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
-          </div>
-          {clienteId && (
+          {isClienteLocked ? (
             <div>
-              <Label>Vehículo</Label>
-              {vehiculos.length === 0 ? (
-                <div className="rounded-md border p-3 text-sm text-muted-foreground flex items-center justify-between">
-                  Este cliente no tiene vehículos registrados.
-                  <Button asChild variant="outline" size="sm">
-                    <a
-                      href={`/clientes/${clienteId}`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      <Plus /> Agregar vehículo
-                    </a>
-                  </Button>
-                </div>
-              ) : (
-                <Select
-                  value={clienteVehiculoId}
-                  onValueChange={setClienteVehiculoId}
-                >
+              <Label>Cliente *</Label>
+              <Input
+                readOnly
+                value={
+                  selectedCliente
+                    ? `${selectedCliente.nombre}${selectedCliente.rut ? ` · ${selectedCliente.rut}` : ""}`
+                    : "Cargando..."
+                }
+              />
+            </div>
+          ) : (
+            <>
+              <div>
+                <Label>Buscar cliente</Label>
+                <Input
+                  value={clientSearch}
+                  onChange={(e) => setClientSearch(e.target.value)}
+                  placeholder="Nombre o RUT..."
+                />
+              </div>
+              <div>
+                <Label>Cliente *</Label>
+                <Select value={clienteId} onValueChange={setClienteId}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Selecciona vehículo (opcional)" />
+                    <SelectValue placeholder="Selecciona cliente" />
                   </SelectTrigger>
                   <SelectContent>
-                    {vehiculos.map((v) => {
-                      const cat = v.vehiculos_catalogo;
-                      const label = cat
-                        ? `${cat.marca} ${cat.modelo} ${cat.anio ?? ""} · ${v.patente ?? "—"}`
-                        : v.patente ?? "Sin datos";
-                      return (
-                        <SelectItem key={v.id} value={v.id}>
-                          {label}
+                    {filteredClientes.length === 0 ? (
+                      <div className="p-2 text-sm text-muted-foreground">
+                        Sin resultados
+                      </div>
+                    ) : (
+                      filteredClientes.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.nombre} {c.rut ? `· ${c.rut}` : ""}
                         </SelectItem>
-                      );
-                    })}
+                      ))
+                    )}
                   </SelectContent>
                 </Select>
-              )}
+              </div>
+            </>
+          )}
+          {clienteId && (
+            <div>
+              <VehiculoSelector
+                clienteId={clienteId}
+                value={clienteVehiculoId}
+                onChange={(id) => setClienteVehiculoId(id)}
+                allowAddNew
+              />
             </div>
           )}
         </div>

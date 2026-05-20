@@ -1,15 +1,15 @@
-import { useMemo, useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import { ArrowLeft, Plus } from "lucide-react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { useEffect, useMemo, useState } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, Eye, Plus } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { NuevaOrdenWizard } from "@/components/ordenes/nueva-orden-wizard";
+import { ChangeHistoryPanel } from "@/components/shared/change-history-panel";
+import { VehiculoSelector } from "@/components/shared/vehiculo-selector";
 import {
   Tabs,
   TabsContent,
@@ -31,28 +31,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { formatCLP, formatDateTime } from "@/lib/format";
-import {
-  vehiculoClienteSchema,
-  type VehiculoClienteFormValues,
-} from "@/lib/clientes-schema";
 import type { Tables } from "@/integrations/supabase/types";
 
 type Cliente = Tables<"clientes">;
@@ -65,6 +44,9 @@ type Cierre = Tables<"cierres">;
 
 function ClienteDetailPage() {
   const { clienteId } = Route.useParams();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [openNuevaOrden, setOpenNuevaOrden] = useState(false);
 
   const { data: cliente, isLoading } = useQuery({
     queryKey: ["clientes", clienteId],
@@ -79,6 +61,123 @@ function ClienteDetailPage() {
     },
   });
 
+  const { data: resumen } = useQuery({
+    queryKey: ["clientes", clienteId, "resumen"],
+    queryFn: async () => {
+      const [
+        serviciosTotal,
+        serviciosEnCurso,
+        vehiculosTotal,
+        cierresPendientes,
+        ultimoServicio,
+      ] = await Promise.all([
+        supabase
+          .from("ordenes_servicio")
+          .select("id", { count: "exact", head: true })
+          .eq("cliente_id", clienteId),
+        supabase
+          .from("ordenes_servicio")
+          .select("id", { count: "exact", head: true })
+          .eq("cliente_id", clienteId)
+          .in("estado", ["pendiente", "asignado", "en_curso"]),
+        supabase
+          .from("clientes_vehiculos")
+          .select("id", { count: "exact", head: true })
+          .eq("cliente_id", clienteId),
+        supabase
+          .from("cierres")
+          .select("total, estado")
+          .eq("cliente_id", clienteId)
+          .in("estado", ["enviado", "con_folio"]),
+        supabase
+          .from("ordenes_servicio")
+          .select("fecha_servicio")
+          .eq("cliente_id", clienteId)
+          .order("fecha_servicio", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      if (serviciosTotal.error) throw serviciosTotal.error;
+      if (serviciosEnCurso.error) throw serviciosEnCurso.error;
+      if (vehiculosTotal.error) throw vehiculosTotal.error;
+      if (cierresPendientes.error) throw cierresPendientes.error;
+      if (ultimoServicio.error) throw ultimoServicio.error;
+
+      const saldo = (cierresPendientes.data ?? []).reduce(
+        (acc, c) => acc + Number((c as any).total ?? 0),
+        0,
+      );
+
+      return {
+        serviciosTotal: serviciosTotal.count ?? 0,
+        serviciosEnCurso: serviciosEnCurso.count ?? 0,
+        vehiculosTotal: vehiculosTotal.count ?? 0,
+        cierresPendientesTotal: (cierresPendientes.data ?? []).length,
+        saldoPendiente: saldo,
+        ultimoServicio: (ultimoServicio.data as any)?.fecha_servicio ?? null,
+      };
+    },
+  });
+
+  useEffect(() => {
+    const invalidate = () => {
+      queryClient.invalidateQueries({ queryKey: ["clientes", clienteId] });
+      queryClient.invalidateQueries({
+        queryKey: ["clientes", clienteId, "vehiculos"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["clientes", clienteId, "ordenes"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["clientes", clienteId, "saldo"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["clientes", clienteId, "resumen"],
+      });
+      queryClient.invalidateQueries({ queryKey: ["clientes"] });
+      queryClient.invalidateQueries({ queryKey: ["clientes", "selector"] });
+    };
+
+    const channel = supabase
+      .channel(`cliente-${clienteId}-realtime`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "clientes", filter: `id=eq.${clienteId}` },
+        invalidate,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "clientes_vehiculos",
+          filter: `cliente_id=eq.${clienteId}`,
+        },
+        invalidate,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "ordenes_servicio",
+          filter: `cliente_id=eq.${clienteId}`,
+        },
+        invalidate,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "cierres", filter: `cliente_id=eq.${clienteId}` },
+        invalidate,
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [clienteId, queryClient]);
+
   if (isLoading) {
     return <div className="text-muted-foreground">Cargando cliente...</div>;
   }
@@ -88,19 +187,69 @@ function ClienteDetailPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <Button asChild variant="ghost" size="icon">
-          <Link to="/clientes">
-            <ArrowLeft />
-          </Link>
-        </Button>
-        <div>
-          <h1 className="text-2xl font-semibold">{cliente.nombre}</h1>
-          <p className="text-sm text-muted-foreground">{cliente.rut ?? "Sin RUT"}</p>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <Button asChild variant="ghost" size="icon">
+            <Link to="/clientes">
+              <ArrowLeft />
+            </Link>
+          </Button>
+          <div>
+            <h1 className="text-2xl font-semibold">{cliente.nombre}</h1>
+            <p className="text-sm text-muted-foreground">{cliente.rut ?? "Sin RUT"}</p>
+          </div>
+          <Badge variant="secondary" className="capitalize ml-2">
+            {cliente.tipo ?? "—"}
+          </Badge>
         </div>
-        <Badge variant="secondary" className="capitalize ml-2">
-          {cliente.tipo ?? "—"}
-        </Badge>
+        <Button onClick={() => setOpenNuevaOrden(true)}>
+          <Plus /> Nueva orden
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Servicios</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-semibold">{resumen?.serviciosTotal ?? "—"}</div>
+            <div className="text-xs text-muted-foreground">
+              Último: {resumen?.ultimoServicio ? formatDateTime(resumen.ultimoServicio) : "—"}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">En curso</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-semibold">{resumen?.serviciosEnCurso ?? "—"}</div>
+            <div className="text-xs text-muted-foreground">Pendiente / asignado / en curso</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Por cobrar</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-semibold text-destructive">
+              {formatCLP(resumen?.saldoPendiente ?? 0)}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {resumen?.cierresPendientesTotal ?? 0} cierres en envío / con folio
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Vehículos</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-semibold">{resumen?.vehiculosTotal ?? "—"}</div>
+            <div className="text-xs text-muted-foreground">Asociados al cliente</div>
+          </CardContent>
+        </Card>
       </div>
 
       <Tabs defaultValue="datos">
@@ -109,6 +258,7 @@ function ClienteDetailPage() {
           <TabsTrigger value="vehiculos">Vehículos</TabsTrigger>
           <TabsTrigger value="servicios">Servicios</TabsTrigger>
           <TabsTrigger value="saldo">Saldo</TabsTrigger>
+          <TabsTrigger value="historial">Historial</TabsTrigger>
         </TabsList>
 
         <TabsContent value="datos">
@@ -123,7 +273,29 @@ function ClienteDetailPage() {
         <TabsContent value="saldo">
           <SaldoTab clienteId={clienteId} />
         </TabsContent>
+        <TabsContent value="historial">
+          <ChangeHistoryPanel entityType="cliente" entityId={clienteId} />
+        </TabsContent>
       </Tabs>
+
+      <Dialog open={openNuevaOrden} onOpenChange={setOpenNuevaOrden}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Nueva orden para {cliente.nombre}</DialogTitle>
+            <DialogDescription>
+              Completa los pasos para generar la orden. El folio interno se asigna automáticamente.
+            </DialogDescription>
+          </DialogHeader>
+          <NuevaOrdenWizard
+            initialClienteId={clienteId}
+            onCancel={() => setOpenNuevaOrden(false)}
+            onCreated={(id) => {
+              setOpenNuevaOrden(false);
+              navigate({ to: "/ordenes/$ordenId", params: { ordenId: id } });
+            }}
+          />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -145,7 +317,14 @@ function DatosTab({ cliente }: { cliente: Cliente }) {
       <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-6">
         <Field label="Nombre" value={cliente.nombre} />
         <Field label="RUT" value={cliente.rut} />
-        <Field label="Tipo" value={<span className="capitalize">{cliente.tipo}</span>} />
+        <Field
+          label="Tipo"
+          value={
+            <span className="capitalize">
+              {(cliente.tipo ?? "").replaceAll("_", " ") || "—"}
+            </span>
+          }
+        />
         <Field label="Email" value={cliente.email} />
         <Field label="Teléfono" value={cliente.telefono} />
         <Field label="Dirección" value={cliente.direccion} />
@@ -153,6 +332,14 @@ function DatosTab({ cliente }: { cliente: Cliente }) {
         <Field label="Período de cierre" value={<span className="capitalize">{cliente.periodo_cierre}</span>} />
         <Field label="Requiere folio" value={cliente.requiere_folio ? "Sí" : "No"} />
         <Field label="IVA incluido" value={cliente.iva_incluido ? "Sí" : "No"} />
+        <Field
+          label="Emails cierres"
+          value={
+            (cliente.emails_cierre ?? []).length
+              ? (cliente.emails_cierre ?? []).join(", ")
+              : "—"
+          }
+        />
         <div className="md:col-span-2">
           <Field label="Observaciones" value={cliente.observaciones} />
         </div>
@@ -164,6 +351,7 @@ function DatosTab({ cliente }: { cliente: Cliente }) {
 function VehiculosTab({ clienteId }: { clienteId: string }) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState<string>("");
 
   const { data: vehiculos = [], isLoading } = useQuery({
     queryKey: ["clientes", clienteId, "vehiculos"],
@@ -175,40 +363,6 @@ function VehiculosTab({ clienteId }: { clienteId: string }) {
       if (error) throw error;
       return (data ?? []) as ClienteVehiculo[];
     },
-  });
-
-  const { data: catalogo = [] } = useQuery({
-    queryKey: ["vehiculos_catalogo"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("vehiculos_catalogo")
-        .select("*")
-        .eq("estado", "activo")
-        .order("marca");
-      if (error) throw error;
-      return (data ?? []) as VehiculoCatalogo[];
-    },
-  });
-
-  const createMutation = useMutation({
-    mutationFn: async (values: VehiculoClienteFormValues) => {
-      const { error } = await supabase.from("clientes_vehiculos").insert({
-        cliente_id: clienteId,
-        vehiculo_catalogo_id: values.vehiculo_catalogo_id,
-        patente: values.patente,
-        color: values.color || null,
-        observaciones: values.observaciones || null,
-      });
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      toast.success("Vehículo agregado");
-      setOpen(false);
-      queryClient.invalidateQueries({
-        queryKey: ["clientes", clienteId, "vehiculos"],
-      });
-    },
-    onError: (e: Error) => toast.error(e.message),
   });
 
   return (
@@ -267,202 +421,24 @@ function VehiculosTab({ clienteId }: { clienteId: string }) {
           <DialogHeader>
             <DialogTitle>Agregar vehículo</DialogTitle>
             <DialogDescription>
-              Selecciona desde el catálogo y completa la patente.
+              Selecciona un vehículo existente o agrega uno nuevo desde el catálogo.
             </DialogDescription>
           </DialogHeader>
-          <AddVehiculoForm
-            catalogo={catalogo}
-            onCancel={() => setOpen(false)}
-            onSubmit={(v) => createMutation.mutateAsync(v)}
-            isSubmitting={createMutation.isPending}
+          <VehiculoSelector
+            clienteId={clienteId}
+            value={selectedId}
+            onChange={(id) => {
+              setSelectedId(id);
+              setOpen(false);
+              queryClient.invalidateQueries({
+                queryKey: ["clientes", clienteId, "vehiculos"],
+              });
+            }}
+            allowAddNew
           />
         </DialogContent>
       </Dialog>
     </Card>
-  );
-}
-
-function AddVehiculoForm({
-  catalogo,
-  onSubmit,
-  onCancel,
-  isSubmitting,
-}: {
-  catalogo: VehiculoCatalogo[];
-  onSubmit: (v: VehiculoClienteFormValues) => Promise<void> | void;
-  onCancel: () => void;
-  isSubmitting: boolean;
-}) {
-  const form = useForm<VehiculoClienteFormValues>({
-    resolver: zodResolver(vehiculoClienteSchema),
-    defaultValues: {
-      vehiculo_catalogo_id: "",
-      patente: "",
-      color: "",
-      observaciones: "",
-    },
-  });
-
-  const [marca, setMarca] = useState<string>("");
-  const [modelo, setModelo] = useState<string>("");
-
-  const marcas = useMemo(
-    () => Array.from(new Set(catalogo.map((c) => c.marca))).sort(),
-    [catalogo],
-  );
-  const modelos = useMemo(
-    () =>
-      Array.from(
-        new Set(catalogo.filter((c) => c.marca === marca).map((c) => c.modelo)),
-      ).sort(),
-    [catalogo, marca],
-  );
-  const anios = useMemo(
-    () =>
-      catalogo
-        .filter((c) => c.marca === marca && c.modelo === modelo)
-        .sort((a, b) => (b.anio ?? 0) - (a.anio ?? 0)),
-    [catalogo, marca, modelo],
-  );
-
-  return (
-    <Form {...form}>
-      <form
-        onSubmit={form.handleSubmit(onSubmit)}
-        className="grid grid-cols-1 md:grid-cols-2 gap-4"
-      >
-        <FormItem>
-          <FormLabel>Marca</FormLabel>
-          <Select
-            value={marca}
-            onValueChange={(v) => {
-              setMarca(v);
-              setModelo("");
-              form.setValue("vehiculo_catalogo_id", "");
-            }}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Selecciona marca" />
-            </SelectTrigger>
-            <SelectContent>
-              {marcas.map((m) => (
-                <SelectItem key={m} value={m}>
-                  {m}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </FormItem>
-
-        <FormItem>
-          <FormLabel>Modelo</FormLabel>
-          <Select
-            value={modelo}
-            onValueChange={(v) => {
-              setModelo(v);
-              form.setValue("vehiculo_catalogo_id", "");
-            }}
-            disabled={!marca}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Selecciona modelo" />
-            </SelectTrigger>
-            <SelectContent>
-              {modelos.map((m) => (
-                <SelectItem key={m} value={m}>
-                  {m}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </FormItem>
-
-        <FormField
-          control={form.control}
-          name="vehiculo_catalogo_id"
-          render={({ field }) => (
-            <FormItem className="md:col-span-2">
-              <FormLabel>Año</FormLabel>
-              <Select
-                onValueChange={field.onChange}
-                value={field.value}
-                disabled={!modelo}
-              >
-                <FormControl>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecciona año" />
-                  </SelectTrigger>
-                </FormControl>
-                <SelectContent>
-                  {anios.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>
-                      {a.anio ?? "Sin año"}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-
-        <FormField
-          control={form.control}
-          name="patente"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Patente *</FormLabel>
-              <FormControl>
-                <Input
-                  className="uppercase"
-                  placeholder="ABCD12"
-                  {...field}
-                  onChange={(e) => field.onChange(e.target.value.toUpperCase())}
-                />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-
-        <FormField
-          control={form.control}
-          name="color"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Color</FormLabel>
-              <FormControl>
-                <Input {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-
-        <FormField
-          control={form.control}
-          name="observaciones"
-          render={({ field }) => (
-            <FormItem className="md:col-span-2">
-              <FormLabel>Observaciones</FormLabel>
-              <FormControl>
-                <Textarea rows={2} {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-
-        <div className="md:col-span-2 flex justify-end gap-2">
-          <Button type="button" variant="outline" onClick={onCancel}>
-            Cancelar
-          </Button>
-          <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting ? "Guardando..." : "Agregar"}
-          </Button>
-        </div>
-      </form>
-    </Form>
   );
 }
 
@@ -512,18 +488,19 @@ function ServiciosTab({ clienteId }: { clienteId: string }) {
               <TableHead>Origen → Destino</TableHead>
               <TableHead className="text-right">Monto</TableHead>
               <TableHead>Estado</TableHead>
+              <TableHead className="text-right">Ver</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground py-6">
+                <TableCell colSpan={7} className="text-center text-muted-foreground py-6">
                   Cargando...
                 </TableCell>
               </TableRow>
             ) : ordenes.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground py-6">
+                <TableCell colSpan={7} className="text-center text-muted-foreground py-6">
                   Sin servicios registrados.
                 </TableCell>
               </TableRow>
@@ -541,6 +518,13 @@ function ServiciosTab({ clienteId }: { clienteId: string }) {
                     <Badge variant={estadoVariant(o.estado)} className="capitalize">
                       {o.estado ?? "—"}
                     </Badge>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button asChild size="icon" variant="ghost">
+                      <Link to="/ordenes/$ordenId" params={{ ordenId: o.id }}>
+                        <Eye />
+                      </Link>
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))
@@ -591,18 +575,19 @@ function SaldoTab({ clienteId }: { clienteId: string }) {
               <TableHead>Vencimiento</TableHead>
               <TableHead className="text-right">Total</TableHead>
               <TableHead>Estado</TableHead>
+              <TableHead className="text-right">Ver</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground py-6">
+                <TableCell colSpan={7} className="text-center text-muted-foreground py-6">
                   Cargando...
                 </TableCell>
               </TableRow>
             ) : cierres.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground py-6">
+                <TableCell colSpan={7} className="text-center text-muted-foreground py-6">
                   Sin saldo pendiente.
                 </TableCell>
               </TableRow>
@@ -622,6 +607,13 @@ function SaldoTab({ clienteId }: { clienteId: string }) {
                     <Badge variant="outline" className="capitalize">
                       {c.estado ?? "—"}
                     </Badge>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button asChild size="icon" variant="ghost">
+                      <Link to="/cierres/$cierreId" params={{ cierreId: c.id }}>
+                        <Eye />
+                      </Link>
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))

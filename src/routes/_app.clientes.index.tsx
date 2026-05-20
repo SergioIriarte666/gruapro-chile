@@ -1,5 +1,5 @@
 import { ExcelImporter } from "@/components/excel-importer";
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -44,6 +44,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ClienteForm } from "@/components/clientes/cliente-form";
 import {
+  parseEmailsCierre,
   tipoClienteOptions,
   type ClienteFormValues,
 } from "@/lib/clientes-schema";
@@ -53,13 +54,34 @@ type Cliente = Tables<"clientes">;
 
 const PAGE_SIZE = 20;
 
-async function fetchClientes(): Promise<Cliente[]> {
-  const { data, error } = await supabase
+async function fetchClientes(input: {
+  q: string;
+  tipo: string;
+  page: number;
+  limit: number;
+}): Promise<{ data: Cliente[]; total: number }> {
+  const q = input.q.trim();
+  const from = supabase
     .from("clientes")
-    .select("*")
+    .select(
+      "id,rut,nombre,tipo,email,telefono,direccion,condicion_pago,requiere_folio,periodo_cierre,iva_incluido,emails_cierre,observaciones,created_at,updated_at",
+      { count: "exact" },
+    )
     .order("nombre");
+
+  const query = q
+    ? from.or(`nombre.ilike.%${q}%,rut.ilike.%${q}%`)
+    : from;
+
+  const query2 =
+    input.tipo !== "todos" ? query.eq("tipo", input.tipo) : query;
+
+  const start = (input.page - 1) * input.limit;
+  const end = start + input.limit - 1;
+
+  const { data, error, count } = await query2.range(start, end);
   if (error) throw error;
-  return data ?? [];
+  return { data: (data ?? []) as Cliente[], total: count ?? 0 };
 }
 
 function tipoBadgeVariant(
@@ -77,10 +99,23 @@ function tipoBadgeVariant(
 
 function ClientesPage() {
   const queryClient = useQueryClient();
-  const { data: clientes = [], isLoading } = useQuery({
-    queryKey: ["clientes"],
-    queryFn: fetchClientes,
-  });
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("clientes-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "clientes" },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ["clientes"] });
+          queryClient.invalidateQueries({ queryKey: ["clientes", "selector"] });
+        },
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [queryClient]);
 
   const [search, setSearch] = useState("");
   const [tipoFilter, setTipoFilter] = useState<string>("todos");
@@ -90,54 +125,76 @@ function ClientesPage() {
   const [editing, setEditing] = useState<Cliente | null>(null);
   const [deleting, setDeleting] = useState<Cliente | null>(null);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return clientes.filter((c) => {
-      const matchSearch =
-        !q ||
-        c.nombre.toLowerCase().includes(q) ||
-        (c.rut ?? "").toLowerCase().includes(q);
-      const matchTipo = tipoFilter === "todos" || c.tipo === tipoFilter;
-      return matchSearch && matchTipo;
-    });
-  }, [clientes, search, tipoFilter]);
+  const { data, isLoading } = useQuery({
+    queryKey: ["clientes", search, tipoFilter, page],
+    queryFn: () =>
+      fetchClientes({ q: search, tipo: tipoFilter, page, limit: PAGE_SIZE }),
+  });
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const clientes = data?.data ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
-  const paginated = filtered.slice(
-    (currentPage - 1) * PAGE_SIZE,
-    currentPage * PAGE_SIZE,
-  );
 
   const createMutation = useMutation({
     mutationFn: async (values: ClienteFormValues) => {
+      const emails = parseEmailsCierre(values.emails_cierre ?? "");
       const payload = {
         ...values,
         rut: values.rut || null,
         email: values.email || null,
         telefono: values.telefono || null,
         direccion: values.direccion || null,
+        emails_cierre: emails.length ? emails : null,
         observaciones: values.observaciones || null,
       };
-      const { error } = await supabase.from("clientes").insert(payload);
+      const { data, error } = await supabase
+        .from("clientes")
+        .insert(payload)
+        .select("id")
+        .single();
       if (error) throw error;
+      const { error: histErr } = await (supabase as any)
+        .from("service_change_history")
+        .insert({
+          entity_type: "cliente",
+          entity_id: data.id,
+          action: "created",
+          new_value: payload,
+        });
+      if (histErr) throw new Error(histErr.message);
     },
     onSuccess: () => {
       toast.success("Cliente creado");
       setOpenCreate(false);
       queryClient.invalidateQueries({ queryKey: ["clientes"] });
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => {
+      const code = (e as any)?.code as string | undefined;
+      if (code === "23505") {
+        toast.error("Ya existe un cliente con ese RUT");
+        return;
+      }
+      toast.error(e.message);
+    },
   });
 
   const updateMutation = useMutation({
     mutationFn: async (vars: { id: string; values: ClienteFormValues }) => {
+      const emails = parseEmailsCierre(vars.values.emails_cierre ?? "");
+      const { data: before, error: beforeErr } = await supabase
+        .from("clientes")
+        .select("*")
+        .eq("id", vars.id)
+        .single();
+      if (beforeErr) throw beforeErr;
       const payload = {
         ...vars.values,
         rut: vars.values.rut || null,
         email: vars.values.email || null,
         telefono: vars.values.telefono || null,
         direccion: vars.values.direccion || null,
+        emails_cierre: emails.length ? emails : null,
         observaciones: vars.values.observaciones || null,
       };
       const { error } = await supabase
@@ -145,6 +202,16 @@ function ClientesPage() {
         .update(payload)
         .eq("id", vars.id);
       if (error) throw error;
+      const { error: histErr } = await (supabase as any)
+        .from("service_change_history")
+        .insert({
+          entity_type: "cliente",
+          entity_id: vars.id,
+          action: "updated",
+          old_value: before,
+          new_value: payload,
+        });
+      if (histErr) throw new Error(histErr.message);
     },
     onSuccess: () => {
       toast.success("Cliente actualizado");
@@ -156,8 +223,32 @@ function ClientesPage() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
+      const { count, error: countErr } = await supabase
+        .from("ordenes_servicio")
+        .select("id", { count: "exact", head: true })
+        .eq("cliente_id", id)
+        .neq("estado", "anulado");
+      if (countErr) throw countErr;
+      if ((count ?? 0) > 0) {
+        throw new Error("No se puede eliminar un cliente con servicios activos");
+      }
+      const { data: before, error: beforeErr } = await supabase
+        .from("clientes")
+        .select("*")
+        .eq("id", id)
+        .single();
+      if (beforeErr) throw beforeErr;
       const { error } = await supabase.from("clientes").delete().eq("id", id);
       if (error) throw error;
+      const { error: histErr } = await (supabase as any)
+        .from("service_change_history")
+        .insert({
+          entity_type: "cliente",
+          entity_id: id,
+          action: "deleted",
+          old_value: before,
+        });
+      if (histErr) throw new Error(histErr.message);
     },
     onSuccess: () => {
       toast.success("Cliente eliminado");
@@ -224,24 +315,25 @@ function ClientesPage() {
                   <TableHead>Teléfono</TableHead>
                   <TableHead>Cond. pago</TableHead>
                   <TableHead>Período</TableHead>
+                  <TableHead>Folio</TableHead>
                   <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
                       Cargando...
                     </TableCell>
                   </TableRow>
-                ) : paginated.length === 0 ? (
+                ) : clientes.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
                       No hay clientes que coincidan con los filtros.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  paginated.map((c) => (
+                  clientes.map((c) => (
                     <TableRow key={c.id}>
                       <TableCell className="font-medium">{c.nombre}</TableCell>
                       <TableCell>{c.rut ?? "—"}</TableCell>
@@ -253,6 +345,11 @@ function ClientesPage() {
                       <TableCell>{c.telefono ?? "—"}</TableCell>
                       <TableCell>{c.condicion_pago ?? 0} días</TableCell>
                       <TableCell className="capitalize">{c.periodo_cierre ?? "—"}</TableCell>
+                      <TableCell>
+                        <Badge variant={c.requiere_folio ? "default" : "outline"}>
+                          {c.requiere_folio ? "Requiere" : "No"}
+                        </Badge>
+                      </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
                           <Button asChild size="icon" variant="ghost" title="Ver detalle">
@@ -287,7 +384,7 @@ function ClientesPage() {
 
           <div className="flex items-center justify-between text-sm text-muted-foreground">
             <div>
-              Mostrando {paginated.length} de {filtered.length} clientes
+              Mostrando {clientes.length} de {total} clientes
             </div>
             <div className="flex items-center gap-2">
               <Button
@@ -351,6 +448,7 @@ function ClientesPage() {
                 periodo_cierre:
                   (editing.periodo_cierre as ClienteFormValues["periodo_cierre"]) ?? "mensual",
                 iva_incluido: editing.iva_incluido ?? true,
+                emails_cierre: (editing.emails_cierre ?? []).join("\n"),
                 observaciones: editing.observaciones ?? "",
               }}
               onSubmit={(v) =>

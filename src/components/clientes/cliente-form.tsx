@@ -227,6 +227,25 @@ export function ClienteForm({
 
         <FormField
           control={form.control}
+          name="emails_cierre"
+          render={({ field }) => (
+            <FormItem className="md:col-span-2">
+              <FormLabel>Emails para cierres</FormLabel>
+              <FormControl>
+                <Textarea
+                  rows={2}
+                  placeholder={"email1@cliente.cl\nemail2@cliente.cl"}
+                  {...field}
+                />
+              </FormControl>
+              <FormDescription>Uno por línea o separados por coma.</FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
           name="observaciones"
           render={({ field }) => (
             <FormItem className="md:col-span-2">

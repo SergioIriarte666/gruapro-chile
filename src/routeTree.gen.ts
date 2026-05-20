@@ -24,6 +24,7 @@ import { Route as AppOrdenesIndexRouteImport } from './routes/_app.ordenes.index
 import { Route as AppClientesIndexRouteImport } from './routes/_app.clientes.index'
 import { Route as AppCierresIndexRouteImport } from './routes/_app.cierres.index'
 import { Route as AppOrdenesOrdenIdRouteImport } from './routes/_app.ordenes.$ordenId'
+import { Route as AppGruasGruaIdRouteImport } from './routes/_app.gruas.$gruaId'
 import { Route as AppClientesClienteIdRouteImport } from './routes/_app.clientes.$clienteId'
 import { Route as AppCierresCierreIdRouteImport } from './routes/_app.cierres.$cierreId'
 
@@ -101,6 +102,11 @@ const AppOrdenesOrdenIdRoute = AppOrdenesOrdenIdRouteImport.update({
   path: '/ordenes/$ordenId',
   getParentRoute: () => AppRoute,
 } as any)
+const AppGruasGruaIdRoute = AppGruasGruaIdRouteImport.update({
+  id: '/$gruaId',
+  path: '/$gruaId',
+  getParentRoute: () => AppGruasRoute,
+} as any)
 const AppClientesClienteIdRoute = AppClientesClienteIdRouteImport.update({
   id: '/clientes/$clienteId',
   path: '/clientes/$clienteId',
@@ -119,12 +125,13 @@ export interface FileRoutesByFullPath {
   '/configuracion': typeof AppConfiguracionRoute
   '/costos': typeof AppCostosRoute
   '/cotizaciones': typeof AppCotizacionesRoute
-  '/gruas': typeof AppGruasRoute
+  '/gruas': typeof AppGruasRouteWithChildren
   '/operadores': typeof AppOperadoresRoute
   '/ordenes-compra': typeof AppOrdenesCompraRoute
   '/vehiculos': typeof AppVehiculosRoute
   '/cierres/$cierreId': typeof AppCierresCierreIdRoute
   '/clientes/$clienteId': typeof AppClientesClienteIdRoute
+  '/gruas/$gruaId': typeof AppGruasGruaIdRoute
   '/ordenes/$ordenId': typeof AppOrdenesOrdenIdRoute
   '/cierres/': typeof AppCierresIndexRoute
   '/clientes/': typeof AppClientesIndexRoute
@@ -136,13 +143,14 @@ export interface FileRoutesByTo {
   '/configuracion': typeof AppConfiguracionRoute
   '/costos': typeof AppCostosRoute
   '/cotizaciones': typeof AppCotizacionesRoute
-  '/gruas': typeof AppGruasRoute
+  '/gruas': typeof AppGruasRouteWithChildren
   '/operadores': typeof AppOperadoresRoute
   '/ordenes-compra': typeof AppOrdenesCompraRoute
   '/vehiculos': typeof AppVehiculosRoute
   '/': typeof AppIndexRoute
   '/cierres/$cierreId': typeof AppCierresCierreIdRoute
   '/clientes/$clienteId': typeof AppClientesClienteIdRoute
+  '/gruas/$gruaId': typeof AppGruasGruaIdRoute
   '/ordenes/$ordenId': typeof AppOrdenesOrdenIdRoute
   '/cierres': typeof AppCierresIndexRoute
   '/clientes': typeof AppClientesIndexRoute
@@ -156,13 +164,14 @@ export interface FileRoutesById {
   '/_app/configuracion': typeof AppConfiguracionRoute
   '/_app/costos': typeof AppCostosRoute
   '/_app/cotizaciones': typeof AppCotizacionesRoute
-  '/_app/gruas': typeof AppGruasRoute
+  '/_app/gruas': typeof AppGruasRouteWithChildren
   '/_app/operadores': typeof AppOperadoresRoute
   '/_app/ordenes-compra': typeof AppOrdenesCompraRoute
   '/_app/vehiculos': typeof AppVehiculosRoute
   '/_app/': typeof AppIndexRoute
   '/_app/cierres/$cierreId': typeof AppCierresCierreIdRoute
   '/_app/clientes/$clienteId': typeof AppClientesClienteIdRoute
+  '/_app/gruas/$gruaId': typeof AppGruasGruaIdRoute
   '/_app/ordenes/$ordenId': typeof AppOrdenesOrdenIdRoute
   '/_app/cierres/': typeof AppCierresIndexRoute
   '/_app/clientes/': typeof AppClientesIndexRoute
@@ -183,6 +192,7 @@ export interface FileRouteTypes {
     | '/vehiculos'
     | '/cierres/$cierreId'
     | '/clientes/$clienteId'
+    | '/gruas/$gruaId'
     | '/ordenes/$ordenId'
     | '/cierres/'
     | '/clientes/'
@@ -201,6 +211,7 @@ export interface FileRouteTypes {
     | '/'
     | '/cierres/$cierreId'
     | '/clientes/$clienteId'
+    | '/gruas/$gruaId'
     | '/ordenes/$ordenId'
     | '/cierres'
     | '/clientes'
@@ -220,6 +231,7 @@ export interface FileRouteTypes {
     | '/_app/'
     | '/_app/cierres/$cierreId'
     | '/_app/clientes/$clienteId'
+    | '/_app/gruas/$gruaId'
     | '/_app/ordenes/$ordenId'
     | '/_app/cierres/'
     | '/_app/clientes/'
@@ -338,6 +350,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrdenesOrdenIdRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/gruas/$gruaId': {
+      id: '/_app/gruas/$gruaId'
+      path: '/$gruaId'
+      fullPath: '/gruas/$gruaId'
+      preLoaderRoute: typeof AppGruasGruaIdRouteImport
+      parentRoute: typeof AppGruasRoute
+    }
     '/_app/clientes/$clienteId': {
       id: '/_app/clientes/$clienteId'
       path: '/clientes/$clienteId'
@@ -355,12 +374,24 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AppGruasRouteChildren {
+  AppGruasGruaIdRoute: typeof AppGruasGruaIdRoute
+}
+
+const AppGruasRouteChildren: AppGruasRouteChildren = {
+  AppGruasGruaIdRoute: AppGruasGruaIdRoute,
+}
+
+const AppGruasRouteWithChildren = AppGruasRoute._addFileChildren(
+  AppGruasRouteChildren,
+)
+
 interface AppRouteChildren {
   AppBodegaRoute: typeof AppBodegaRoute
   AppConfiguracionRoute: typeof AppConfiguracionRoute
   AppCostosRoute: typeof AppCostosRoute
   AppCotizacionesRoute: typeof AppCotizacionesRoute
-  AppGruasRoute: typeof AppGruasRoute
+  AppGruasRoute: typeof AppGruasRouteWithChildren
   AppOperadoresRoute: typeof AppOperadoresRoute
   AppOrdenesCompraRoute: typeof AppOrdenesCompraRoute
   AppVehiculosRoute: typeof AppVehiculosRoute
@@ -378,7 +409,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppConfiguracionRoute: AppConfiguracionRoute,
   AppCostosRoute: AppCostosRoute,
   AppCotizacionesRoute: AppCotizacionesRoute,
-  AppGruasRoute: AppGruasRoute,
+  AppGruasRoute: AppGruasRouteWithChildren,
   AppOperadoresRoute: AppOperadoresRoute,
   AppOrdenesCompraRoute: AppOrdenesCompraRoute,
   AppVehiculosRoute: AppVehiculosRoute,
