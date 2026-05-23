@@ -23,7 +23,7 @@ type ClienteVehiculoConCatalogo = Pick<
 > & {
   vehiculos_catalogo: Pick<
     Tables<"vehiculos_catalogo">,
-    "id" | "marca" | "modelo" | "anio" | "tipo"
+    "id" | "marca" | "modelo" | "tipo"
   > | null;
 };
 
@@ -48,7 +48,7 @@ export function VehiculoSelector({
     queryFn: async (): Promise<ClienteVehiculoConCatalogo[]> => {
       const { data, error } = await supabase
         .from("clientes_vehiculos")
-        .select("id,cliente_id,vehiculo_catalogo_id,patente,color,observaciones,vehiculos_catalogo(id,marca,modelo,anio,tipo)")
+        .select("id,cliente_id,vehiculo_catalogo_id,patente,color,observaciones,vehiculos_catalogo(id,marca,modelo,tipo)")
         .eq("cliente_id", clienteId)
         .order("created_at", { ascending: false });
       if (error) throw error;
@@ -65,7 +65,7 @@ export function VehiculoSelector({
     return vehiculos.map((v) => {
       const cat = v.vehiculos_catalogo;
       const display = cat
-        ? `${cat.marca} ${cat.modelo} ${cat.anio ?? ""} · ${cat.tipo ?? ""} · ${v.patente ?? "—"}`
+        ? `${cat.marca} ${cat.modelo} · ${cat.tipo ?? ""} · ${v.patente ?? "—"}`
         : v.patente ?? "Sin datos";
       return { id: v.id, display, data: v };
     });
@@ -108,17 +108,17 @@ export function VehiculoSelector({
     },
   });
 
-  const { data: anios = [] } = useQuery({
-    queryKey: ["vehiculos-catalogo", "selector", "anios", marca, modelo],
+  const { data: catalogo = [] } = useQuery({
+    queryKey: ["vehiculos-catalogo", "selector", "catalogo", marca, modelo],
     enabled: allowAddNew && showAdd && !!marca && !!modelo,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("vehiculos_catalogo")
-        .select("id,anio,tipo")
+        .select("id,tipo,combustible")
         .eq("estado", "activo")
         .eq("marca", marca)
         .eq("modelo", modelo)
-        .order("anio", { ascending: false });
+        .order("tipo");
       if (error) throw error;
       return data ?? [];
     },
@@ -138,7 +138,7 @@ export function VehiculoSelector({
           color: color.trim() || null,
           observaciones: observaciones.trim() || null,
         })
-        .select("id,cliente_id,vehiculo_catalogo_id,patente,color,observaciones,vehiculos_catalogo(id,marca,modelo,anio,tipo)")
+        .select("id,cliente_id,vehiculo_catalogo_id,patente,color,observaciones,vehiculos_catalogo(id,marca,modelo,tipo)")
         .single();
       if (error) throw error;
 
@@ -266,19 +266,19 @@ export function VehiculoSelector({
             </div>
 
             <div className="md:col-span-2">
-              <Label>Año *</Label>
+              <Label>Vehículo *</Label>
               <Select
                 value={vehiculoCatalogoId}
                 onValueChange={setVehiculoCatalogoId}
                 disabled={!modelo}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Selecciona año" />
+                  <SelectValue placeholder="Selecciona vehículo" />
                 </SelectTrigger>
                 <SelectContent>
-                  {anios.map((a: any) => (
-                    <SelectItem key={a.id} value={a.id}>
-                      {(a.anio ?? "Sin año") + (a.tipo ? ` · ${a.tipo}` : "")}
+                  {catalogo.map((v: any) => (
+                    <SelectItem key={v.id} value={v.id}>
+                      {(v.tipo ?? "—") + (v.combustible ? ` · ${v.combustible}` : "")}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -323,4 +323,3 @@ export function VehiculoSelector({
     </div>
   );
 }
-

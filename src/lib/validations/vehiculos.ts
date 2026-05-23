@@ -9,15 +9,21 @@ export const VEHICULO_TIPO_OPTIONS = [
   "Moto",
 ] as const;
 
+export const VEHICULO_COMBUSTIBLE_OPTIONS = [
+  "Bencina",
+  "Diésel",
+  "Eléctrico",
+  "Híbrido",
+  "GLP",
+  "GNC",
+  "Otro",
+] as const;
+
 export const VEHICULO_ESTADO_OPTIONS = ["activo", "inactivo"] as const;
 
 export const createVehiculoSchema = z.object({
   marca: z.string().trim().min(1, "La marca es obligatoria").max(100),
   modelo: z.string().trim().min(1, "El modelo es obligatorio").max(100),
-  anio: z.preprocess(
-    (v) => (v === "" || v == null ? undefined : Number(v)),
-    z.number().int().min(1980).max(2030).optional(),
-  ),
   tipo: z.enum(VEHICULO_TIPO_OPTIONS, {
     errorMap: () => ({ message: "Debes seleccionar un tipo" }),
   }),

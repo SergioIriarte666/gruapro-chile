@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Eye, Pencil, Plus } from "lucide-react";
+import { ArrowLeft, Eye, Pencil, Plus, Search } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,12 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import {
   Table,
   TableBody,
   TableCell,
@@ -31,6 +37,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { formatCLP, formatDateTime } from "@/lib/format";
 import type { Tables } from "@/integrations/supabase/types";
 import { ClienteForm } from "@/components/clientes/cliente-form";
@@ -309,7 +316,7 @@ function ClienteDetailPage() {
         </Card>
       </div>
 
-      <Tabs defaultValue="datos">
+      <Tabs defaultValue="servicios">
         <TabsList>
           <TabsTrigger value="datos">Datos</TabsTrigger>
           <TabsTrigger value="vehiculos">Vehículos</TabsTrigger>
@@ -472,7 +479,6 @@ function VehiculosTab({ clienteId }: { clienteId: string }) {
               <TableHead>Patente</TableHead>
               <TableHead>Marca</TableHead>
               <TableHead>Modelo</TableHead>
-              <TableHead>Año</TableHead>
               <TableHead>Color</TableHead>
               <TableHead>Observaciones</TableHead>
             </TableRow>
@@ -480,13 +486,13 @@ function VehiculosTab({ clienteId }: { clienteId: string }) {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground py-6">
+                <TableCell colSpan={5} className="text-center text-muted-foreground py-6">
                   Cargando...
                 </TableCell>
               </TableRow>
             ) : vehiculos.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground py-6">
+                <TableCell colSpan={5} className="text-center text-muted-foreground py-6">
                   Sin vehículos registrados.
                 </TableCell>
               </TableRow>
@@ -496,7 +502,6 @@ function VehiculosTab({ clienteId }: { clienteId: string }) {
                   <TableCell className="font-medium uppercase">{v.patente ?? "—"}</TableCell>
                   <TableCell>{v.vehiculos_catalogo?.marca ?? "—"}</TableCell>
                   <TableCell>{v.vehiculos_catalogo?.modelo ?? "—"}</TableCell>
-                  <TableCell>{v.vehiculos_catalogo?.anio ?? "—"}</TableCell>
                   <TableCell>{v.color ?? "—"}</TableCell>
                   <TableCell className="text-muted-foreground">
                     {v.observaciones ?? "—"}
@@ -552,79 +557,204 @@ function estadoVariant(
 }
 
 function ServiciosTab({ clienteId }: { clienteId: string }) {
+  type OrdenPipelineRow = Pick<
+    Tables<"ordenes_servicio">,
+    | "id"
+    | "folio_interno"
+    | "tipo_servicio"
+    | "estado"
+    | "monto"
+    | "fecha_servicio"
+    | "created_at"
+    | "updated_at"
+  > & {
+    clientes_vehiculos: { patente: string | null } | null;
+  };
+
+  const [search, setSearch] = useState("");
   const { data: ordenes = [], isLoading } = useQuery({
     queryKey: ["clientes", clienteId, "ordenes"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("ordenes_servicio")
-        .select("*")
+        .select(
+          "id,folio_interno,tipo_servicio,estado,monto,fecha_servicio,created_at,updated_at,clientes_vehiculos(patente)",
+        )
         .eq("cliente_id", clienteId)
-        .order("fecha_servicio", { ascending: false });
+        .order("created_at", { ascending: false });
       if (error) throw error;
-      return (data ?? []) as OrdenServicio[];
+      return (data ?? []) as unknown as OrdenPipelineRow[];
     },
   });
 
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return ordenes;
+    return ordenes.filter((o) => {
+      const folio = (o.folio_interno ?? "").toLowerCase();
+      const tipo = (o.tipo_servicio ?? "").toLowerCase();
+      const estado = (o.estado ?? "").toLowerCase();
+      const patente = (o.clientes_vehiculos?.patente ?? "").toLowerCase();
+      return (
+        folio.includes(q) ||
+        tipo.includes(q) ||
+        estado.includes(q) ||
+        patente.includes(q)
+      );
+    });
+  }, [ordenes, search]);
+
+  const estados = ["pendiente", "en_curso", "completado", "facturado", "anulado"] as const;
+
+  const grouped = useMemo(() => {
+    const map: Record<string, OrdenPipelineRow[]> = {};
+    for (const e of estados) map[e] = [];
+    for (const o of filtered) {
+      const e = (o.estado ?? "pendiente") as string;
+      if (!map[e]) map[e] = [];
+      map[e].push(o);
+    }
+    return map;
+  }, [filtered]);
+
+  const estadosActivos = useMemo(() => {
+    return estados.filter((e) => e !== "anulado" && (grouped[e] ?? []).length > 0).length;
+  }, [grouped]);
+
+  function diasEnEstado(o: OrdenPipelineRow) {
+    const start = o.created_at ? new Date(o.created_at) : null;
+    const end = o.updated_at ? new Date(o.updated_at) : new Date();
+    if (!start || Number.isNaN(start.getTime())) return 0;
+    const diff = end.getTime() - start.getTime();
+    return Math.max(0, Math.round(diff / (24 * 60 * 60 * 1000)));
+  }
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Historial de servicios</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Folio</TableHead>
-              <TableHead>Fecha</TableHead>
-              <TableHead>Tipo</TableHead>
-              <TableHead>Origen → Destino</TableHead>
-              <TableHead className="text-right">Monto</TableHead>
-              <TableHead>Estado</TableHead>
-              <TableHead className="text-right">Ver</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground py-6">
-                  Cargando...
-                </TableCell>
-              </TableRow>
-            ) : ordenes.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground py-6">
-                  Sin servicios registrados.
-                </TableCell>
-              </TableRow>
-            ) : (
-              ordenes.map((o) => (
-                <TableRow key={o.id}>
-                  <TableCell className="font-medium">{o.folio_interno ?? "—"}</TableCell>
-                  <TableCell>{formatDateTime(o.fecha_servicio)}</TableCell>
-                  <TableCell className="capitalize">{o.tipo_servicio ?? "—"}</TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {(o.origen ?? "—") + " → " + (o.destino ?? "—")}
-                  </TableCell>
-                  <TableCell className="text-right">{formatCLP(o.monto)}</TableCell>
-                  <TableCell>
-                    <Badge variant={estadoVariant(o.estado)} className="capitalize">
-                      {o.estado ?? "—"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button asChild size="icon" variant="ghost">
-                      <Link to="/ordenes/$ordenId" params={{ ordenId: o.id }}>
-                        <Eye />
-                      </Link>
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Pipeline de servicios por estado</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar por folio, tipo o patente…"
+              className="pl-8"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Card>
+              <CardContent className="pt-6">
+                <div className="text-2xl font-semibold">{filtered.length}</div>
+                <div className="text-sm text-muted-foreground">Total servicios</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="text-2xl font-semibold">{estadosActivos}</div>
+                <div className="text-sm text-muted-foreground">Estados activos</div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {isLoading ? (
+            <div className="text-sm text-muted-foreground">Cargando...</div>
+          ) : filtered.length === 0 ? (
+            <div className="text-sm text-muted-foreground">Sin servicios.</div>
+          ) : (
+            <Accordion type="multiple" defaultValue={["pendiente", "en_curso"]}>
+              {estados.map((estado) => {
+                const items = grouped[estado] ?? [];
+                const avg =
+                  items.length === 0
+                    ? 0
+                    : Math.round(items.reduce((acc, o) => acc + diasEnEstado(o), 0) / items.length);
+                const ultimo = items
+                  .map((o) => o.fecha_servicio ?? o.created_at ?? null)
+                  .filter(Boolean)
+                  .sort()
+                  .at(-1) as string | null;
+
+                return (
+                  <AccordionItem key={estado} value={estado}>
+                    <AccordionTrigger>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={estadoVariant(estado)} className="capitalize">
+                          {estado.replaceAll("_", " ")}
+                        </Badge>
+                        <span className="text-muted-foreground text-sm">
+                          {items.length} · Promedio: {avg} días
+                          {ultimo ? ` · Último: ${formatDateTime(ultimo)}` : ""}
+                        </span>
+                      </div>
+                    </AccordionTrigger>
+                    <AccordionContent>
+                      <div className="rounded-md border overflow-hidden">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Folio</TableHead>
+                              <TableHead>Tipo de servicio</TableHead>
+                              <TableHead>Fecha</TableHead>
+                              <TableHead>Patente</TableHead>
+                              <TableHead className="text-right">Valor</TableHead>
+                              <TableHead className="text-right">Días en estado</TableHead>
+                              <TableHead className="text-right">Ver</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {items.length === 0 ? (
+                              <TableRow>
+                                <TableCell
+                                  colSpan={7}
+                                  className="text-center text-muted-foreground py-6"
+                                >
+                                  Sin servicios en este estado.
+                                </TableCell>
+                              </TableRow>
+                            ) : (
+                              items.map((o) => (
+                                <TableRow key={o.id}>
+                                  <TableCell className="font-medium">
+                                    {o.folio_interno ?? "—"}
+                                  </TableCell>
+                                  <TableCell className="capitalize">
+                                    {o.tipo_servicio ?? "—"}
+                                  </TableCell>
+                                  <TableCell>{formatDateTime(o.fecha_servicio)}</TableCell>
+                                  <TableCell className="uppercase">
+                                    {o.clientes_vehiculos?.patente ?? "—"}
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    {formatCLP(o.monto)}
+                                  </TableCell>
+                                  <TableCell className="text-right">{diasEnEstado(o)}</TableCell>
+                                  <TableCell className="text-right">
+                                    <Button asChild size="icon" variant="ghost">
+                                      <Link to="/ordenes/$ordenId" params={{ ordenId: o.id }}>
+                                        <Eye />
+                                      </Link>
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                              ))
+                            )}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                );
+              })}
+            </Accordion>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 

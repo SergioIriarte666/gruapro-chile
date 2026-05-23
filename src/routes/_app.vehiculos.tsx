@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
@@ -44,6 +44,7 @@ import {
 import type { Tables } from "@/integrations/supabase/types";
 import {
   createVehiculoSchema,
+  VEHICULO_COMBUSTIBLE_OPTIONS,
   VEHICULO_ESTADO_OPTIONS,
   VEHICULO_TIPO_OPTIONS,
 } from "@/lib/validations/vehiculos";
@@ -103,8 +104,7 @@ function VehiculoCatalogoPage() {
         .from("vehiculos_catalogo")
         .select("*", { count: "exact" })
         .order("marca")
-        .order("modelo")
-        .order("anio", { ascending: false });
+        .order("modelo");
 
       const byEstado = estado !== "todos" ? from.eq("estado", estado) : from;
       const byTipo = tipo !== "todos" ? byEstado.eq("tipo", tipo) : byEstado;
@@ -131,20 +131,20 @@ function VehiculoCatalogoPage() {
       const parsed = createVehiculoSchema.parse(values);
       const marca = parsed.marca;
       const modelo = parsed.modelo;
-      const anio = parsed.anio ?? null;
+      const tipo = parsed.tipo;
 
       const dupQuery = supabase
         .from("vehiculos_catalogo")
         .select("id")
         .eq("marca", marca)
-        .eq("modelo", modelo);
+        .eq("modelo", modelo)
+        .eq("tipo", tipo)
+        .maybeSingle();
 
-      const { data: dup, error: dupErr } =
-        anio == null ? await dupQuery.is("anio", null).maybeSingle() : await dupQuery.eq("anio", anio).maybeSingle();
-
+      const { data: dup, error: dupErr } = await dupQuery;
       if (dupErr) throw dupErr;
       if (dup) {
-        throw new Error("Ya existe un vehículo con esa combinación marca + modelo + año");
+        throw new Error("Ya existe un vehículo con esa combinación marca + modelo + tipo");
       }
 
       const { data: created, error } = await supabase
@@ -152,8 +152,8 @@ function VehiculoCatalogoPage() {
         .insert({
           marca,
           modelo,
-          anio,
-          tipo: parsed.tipo,
+          anio: null,
+          tipo,
           combustible: parsed.combustible || null,
           estado: parsed.estado,
         })
@@ -207,7 +207,6 @@ function VehiculoCatalogoPage() {
           : {
               marca: parsed.marca,
               modelo: parsed.modelo,
-              anio: parsed.anio ?? null,
               tipo: parsed.tipo,
               combustible: parsed.combustible || null,
               estado: parsed.estado,
@@ -286,7 +285,7 @@ function VehiculoCatalogoPage() {
 
   const subtitle = useMemo(
     () =>
-      "El catálogo define marca/modelo/año/tipo. La patente se registra por cliente.",
+      "El catálogo define marca/modelo/tipo. La patente se registra por cliente.",
     [],
   );
 
@@ -381,7 +380,6 @@ function VehiculoCatalogoPage() {
                 <TableRow>
                   <TableHead>Marca</TableHead>
                   <TableHead>Modelo</TableHead>
-                  <TableHead>Año</TableHead>
                   <TableHead>Tipo</TableHead>
                   <TableHead>Combustible</TableHead>
                   <TableHead>Estado</TableHead>
@@ -406,7 +404,6 @@ function VehiculoCatalogoPage() {
                     <TableRow key={r.id}>
                       <TableCell className="font-medium">{r.marca}</TableCell>
                       <TableCell>{r.modelo}</TableCell>
-                      <TableCell>{r.anio ?? "—"}</TableCell>
                       <TableCell>
                         <Badge variant={tipoVariant(r.tipo)}>{r.tipo ?? "—"}</Badge>
                       </TableCell>
@@ -503,7 +500,6 @@ function VehiculoCatalogoPage() {
               defaultValues={{
                 marca: editing.marca,
                 modelo: editing.modelo,
-                anio: editing.anio ?? undefined,
                 tipo: (editing.tipo as any) ?? "Auto",
                 combustible: editing.combustible ?? "",
                 estado: (editing.estado as any) ?? "activo",
@@ -536,6 +532,19 @@ function VehiculoForm({
   submitLabel: string;
   vehiculoId?: string;
 }) {
+  const { data: marcas = [] } = useQuery({
+    queryKey: ["vehiculos-catalogo", "marcas"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("vehiculos_catalogo")
+        .select("marca")
+        .eq("estado", "activo")
+        .order("marca");
+      if (error) throw error;
+      return Array.from(new Set((data ?? []).map((r) => r.marca))).sort();
+    },
+  });
+
   const { data: refCount = 0 } = useQuery({
     queryKey: ["vehiculos-catalogo", "refcount", vehiculoId],
     enabled: !!vehiculoId,
@@ -554,7 +563,6 @@ function VehiculoForm({
     defaultValues: {
       marca: "",
       modelo: "",
-      anio: undefined,
       tipo: "Auto",
       combustible: "",
       estado: "activo",
@@ -563,6 +571,16 @@ function VehiculoForm({
   });
 
   const locked = (refCount ?? 0) > 0;
+  const [marcaSelect, setMarcaSelect] = useState<string>("");
+
+  useEffect(() => {
+    const current = form.getValues("marca");
+    if (!current) {
+      setMarcaSelect("");
+      return;
+    }
+    setMarcaSelect(marcas.includes(current) ? current : "__custom__");
+  }, [form, marcas]);
 
   return (
     <Form {...form}>
@@ -576,9 +594,45 @@ function VehiculoForm({
           render={({ field }) => (
             <FormItem>
               <FormLabel>Marca *</FormLabel>
-              <FormControl>
-                <Input disabled={locked} {...field} />
-              </FormControl>
+              {locked ? (
+                <FormControl>
+                  <Input disabled {...field} />
+                </FormControl>
+              ) : (
+                <>
+                  <Select
+                    value={marcaSelect}
+                    onValueChange={(v) => {
+                      if (v === "__custom__") {
+                        setMarcaSelect(v);
+                        field.onChange("");
+                        return;
+                      }
+                      setMarcaSelect(v);
+                      field.onChange(v);
+                    }}
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecciona marca" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {marcas.map((m) => (
+                        <SelectItem key={m} value={m}>
+                          {m}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value="__custom__">Nueva marca…</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {marcaSelect === "__custom__" ? (
+                    <FormControl>
+                      <Input className="mt-2" placeholder="Escribe la marca" {...field} />
+                    </FormControl>
+                  ) : null}
+                </>
+              )}
               <FormMessage />
             </FormItem>
           )}
@@ -591,26 +645,6 @@ function VehiculoForm({
               <FormLabel>Modelo *</FormLabel>
               <FormControl>
                 <Input disabled={locked} {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-        <FormField
-          control={form.control}
-          name="anio"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Año</FormLabel>
-              <FormControl>
-                <Input
-                  type="number"
-                  min={1980}
-                  max={2030}
-                  disabled={locked}
-                  value={field.value == null ? "" : String(field.value)}
-                  onChange={(e) => field.onChange(e.target.value)}
-                />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -650,9 +684,24 @@ function VehiculoForm({
           render={({ field }) => (
             <FormItem>
               <FormLabel>Combustible</FormLabel>
-              <FormControl>
-                <Input placeholder="Gasolina / Diésel / ..." {...field} />
-              </FormControl>
+              <Select
+                value={field.value ? field.value : "__none__"}
+                onValueChange={(v) => field.onChange(v === "__none__" ? "" : v)}
+              >
+                <FormControl>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecciona combustible" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  <SelectItem value="__none__">Sin definir</SelectItem>
+                  {VEHICULO_COMBUSTIBLE_OPTIONS.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <FormMessage />
             </FormItem>
           )}

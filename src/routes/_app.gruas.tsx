@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -42,6 +42,7 @@ import {
   ESTADO_GRUA_OPTIONS,
   TIPO_GRUA_OPTIONS,
 } from "@/lib/validations/gruas";
+import { GruaDetailView } from "./_app.gruas.$gruaId";
 
 type Grua = Tables<"gruas">;
 
@@ -63,6 +64,7 @@ function GruasPage() {
   const [page, setPage] = useState(1);
   const [openCreate, setOpenCreate] = useState(false);
   const [editing, setEditing] = useState<Grua | null>(null);
+  const [detailGruaId, setDetailGruaId] = useState<string | null>(null);
 
   useEffect(() => {
     const channel = supabase
@@ -344,9 +346,15 @@ function GruasPage() {
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between gap-2">
                   <CardTitle className="text-lg">
-                    <Link to="/gruas/$gruaId" params={{ gruaId: g.id }}>
+                    <button
+                      type="button"
+                      className="text-left hover:underline"
+                      onClick={(e) => {
+                        setDetailGruaId(g.id);
+                      }}
+                    >
                       {g.patente}
-                    </Link>
+                    </button>
                   </CardTitle>
                   <Badge className={estadoBadgeClass(g.estado)}>
                     {(g.estado ?? "activa").replaceAll("_", " ")}
@@ -440,6 +448,12 @@ function GruasPage() {
               }
             />
           ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!detailGruaId} onOpenChange={(o) => !o && setDetailGruaId(null)}>
+        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+          {detailGruaId ? <GruaDetailView gruaId={detailGruaId} /> : null}
         </DialogContent>
       </Dialog>
     </div>

@@ -2,19 +2,19 @@ import { useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowLeft, Pencil } from "lucide-react";
+import {
+  ArrowLeft,
+  BarChart3,
+  Box,
+  DollarSign,
+  Pencil,
+  Settings,
+  Warehouse,
+  Wrench,
+} from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import type { z } from "zod";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  CartesianGrid,
-} from "recharts";
 
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
@@ -84,6 +84,16 @@ export const Route = createFileRoute("/_app/gruas/$gruaId")({
 
 function GruaDetailPage() {
   const { gruaId } = Route.useParams();
+  return <GruaDetailView gruaId={gruaId} showBackLink />;
+}
+
+export function GruaDetailView({
+  gruaId,
+  showBackLink = false,
+}: {
+  gruaId: string;
+  showBackLink?: boolean;
+}) {
   const queryClient = useQueryClient();
   const [openEdit, setOpenEdit] = useState(false);
 
@@ -93,6 +103,55 @@ function GruaDetailPage() {
       const { data, error } = await supabase.from("gruas").select("*").eq("id", gruaId).single();
       if (error) throw error;
       return data as Grua;
+    },
+  });
+
+  const { data: tabCounts } = useQuery({
+    queryKey: ["gruas", gruaId, "tab-counts"],
+    queryFn: async () => {
+      const [
+        serviciosRes,
+        costosRes,
+        piezasRes,
+        mantencionesRes,
+      ] = await Promise.all([
+        supabase
+          .from("ordenes_servicio")
+          .select("id", { count: "exact", head: true })
+          .eq("grua_id", gruaId),
+        supabase.from("costos").select("id", { count: "exact", head: true }).eq("grua_id", gruaId),
+        supabase
+          .from("bodega_movimientos")
+          .select("id", { count: "exact", head: true })
+          .eq("grua_id", gruaId)
+          .eq("tipo", "salida"),
+        supabase
+          .from("costos")
+          .select("id,descripcion,subcategorias_costo(nombre)")
+          .eq("grua_id", gruaId),
+      ]);
+
+      if (serviciosRes.error) throw serviciosRes.error;
+      if (costosRes.error) throw costosRes.error;
+      if (piezasRes.error) throw piezasRes.error;
+      if (mantencionesRes.error) throw mantencionesRes.error;
+
+      const mantenciones = (mantencionesRes.data ?? []).filter((c: any) => {
+        const name = (c.subcategorias_costo?.nombre ?? "").toLowerCase();
+        return (
+          name.includes("preventiva") ||
+          name.includes("correctiva") ||
+          name.includes("mantencion") ||
+          name.includes("mantención")
+        );
+      });
+
+      return {
+        servicios: serviciosRes.count ?? 0,
+        costos: costosRes.count ?? 0,
+        piezas: piezasRes.count ?? 0,
+        mantenciones: mantenciones.length,
+      };
     },
   });
 
@@ -180,11 +239,13 @@ function GruaDetailPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
-          <Button asChild variant="ghost" size="icon">
-            <Link to="/gruas">
-              <ArrowLeft />
-            </Link>
-          </Button>
+          {showBackLink ? (
+            <Button asChild variant="ghost" size="icon">
+              <Link to="/gruas">
+                <ArrowLeft />
+              </Link>
+            </Button>
+          ) : null}
           <div>
             <h1 className="text-2xl font-semibold">{grua.patente}</h1>
             <p className="text-sm text-muted-foreground">
@@ -206,18 +267,66 @@ function GruaDetailPage() {
         </Card>
       ) : null}
 
-      <Tabs defaultValue="datos">
-        <TabsList>
-          <TabsTrigger value="datos">Datos</TabsTrigger>
-          <TabsTrigger value="servicios">Servicios</TabsTrigger>
-          <TabsTrigger value="costos">Costos</TabsTrigger>
-          <TabsTrigger value="mantenciones">Mantenciones</TabsTrigger>
-          <TabsTrigger value="documentos">Documentos</TabsTrigger>
-          <TabsTrigger value="historial">Historial</TabsTrigger>
+      <Tabs defaultValue="resumen">
+        <TabsList className="w-full justify-start flex-wrap gap-2 bg-transparent p-0">
+          <TabsTrigger
+            value="resumen"
+            className="data-[state=active]:bg-purple-600 data-[state=active]:text-white rounded-md"
+          >
+            <BarChart3 className="h-4 w-4" />
+            <span className="ml-2">Resumen</span>
+          </TabsTrigger>
+          <TabsTrigger
+            value="servicios"
+            className="data-[state=active]:bg-purple-600 data-[state=active]:text-white rounded-md"
+          >
+            <Wrench className="h-4 w-4" />
+            <span className="ml-2">Servicios</span>
+            <span className="ml-2 rounded-full border px-2 py-0.5 text-xs data-[state=active]:border-white/30">
+              {tabCounts?.servicios ?? 0}
+            </span>
+          </TabsTrigger>
+          <TabsTrigger
+            value="costos"
+            className="data-[state=active]:bg-purple-600 data-[state=active]:text-white rounded-md"
+          >
+            <DollarSign className="h-4 w-4" />
+            <span className="ml-2">Costos</span>
+            <span className="ml-2 rounded-full border px-2 py-0.5 text-xs data-[state=active]:border-white/30">
+              {tabCounts?.costos ?? 0}
+            </span>
+          </TabsTrigger>
+          <TabsTrigger
+            value="piezas"
+            className="data-[state=active]:bg-purple-600 data-[state=active]:text-white rounded-md"
+          >
+            <Box className="h-4 w-4" />
+            <span className="ml-2">Piezas</span>
+            <span className="ml-2 rounded-full border px-2 py-0.5 text-xs data-[state=active]:border-white/30">
+              {tabCounts?.piezas ?? 0}
+            </span>
+          </TabsTrigger>
+          <TabsTrigger
+            value="mant"
+            className="data-[state=active]:bg-purple-600 data-[state=active]:text-white rounded-md"
+          >
+            <Settings className="h-4 w-4" />
+            <span className="ml-2">Mant.</span>
+            <span className="ml-2 rounded-full border px-2 py-0.5 text-xs data-[state=active]:border-white/30">
+              {tabCounts?.mantenciones ?? 0}
+            </span>
+          </TabsTrigger>
+          <TabsTrigger
+            value="inventario"
+            className="data-[state=active]:bg-purple-600 data-[state=active]:text-white rounded-md"
+          >
+            <Warehouse className="h-4 w-4" />
+            <span className="ml-2">Inventario</span>
+          </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="datos">
-          <DatosTab grua={grua} />
+        <TabsContent value="resumen">
+          <ResumenTab grua={grua} />
         </TabsContent>
         <TabsContent value="servicios">
           <ServiciosTab gruaId={gruaId} />
@@ -225,14 +334,14 @@ function GruaDetailPage() {
         <TabsContent value="costos">
           <CostosTab gruaId={gruaId} />
         </TabsContent>
-        <TabsContent value="mantenciones">
+        <TabsContent value="piezas">
+          <PiezasTab gruaId={gruaId} />
+        </TabsContent>
+        <TabsContent value="mant">
           <MantencionesTab gruaId={gruaId} />
         </TabsContent>
-        <TabsContent value="documentos">
-          <DocumentosTab gruaId={gruaId} />
-        </TabsContent>
-        <TabsContent value="historial">
-          <ChangeHistoryPanel entityType="grua" entityId={gruaId} />
+        <TabsContent value="inventario">
+          <InventarioTab gruaId={gruaId} />
         </TabsContent>
       </Tabs>
 
@@ -274,7 +383,7 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function DatosTab({ grua }: { grua: Grua }) {
+function ResumenTab({ grua }: { grua: Grua }) {
   return (
     <Card>
       <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-6">
@@ -381,18 +490,6 @@ function CostosTab({ gruaId }: { gruaId: string }) {
 
   const totalCostos = costos.reduce((s, c) => s + Number(c.monto ?? 0), 0);
 
-  const porMes = useMemo(() => {
-    const map: Record<string, number> = {};
-    for (const c of costos) {
-      const k = (c.fecha ?? "").slice(0, 7);
-      if (!k) continue;
-      map[k] = (map[k] ?? 0) + Number(c.monto ?? 0);
-    }
-    return Object.entries(map)
-      .map(([mes, monto]) => ({ mes, monto }))
-      .sort((a, b) => a.mes.localeCompare(b.mes));
-  }, [costos]);
-
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
@@ -407,17 +504,6 @@ function CostosTab({ gruaId }: { gruaId: string }) {
           <div className="text-sm text-muted-foreground">Cargando...</div>
         ) : (
           <>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={porMes}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="mes" />
-                  <YAxis />
-                  <Tooltip formatter={(v) => formatCLP(Number(v))} />
-                  <Bar dataKey="monto" fill="#0ea5e9" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
             <div className="rounded-md border overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-muted">
@@ -470,8 +556,48 @@ function MantencionesTab({ gruaId }: { gruaId: string }) {
     });
   }, [costos]);
 
-  const { data: movimientos = [], isLoading: loadingMov } = useQuery({
-    queryKey: ["gruas", gruaId, "mantenciones-repuestos"],
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Mantenciones</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {loadingCostos ? (
+          <div className="text-sm text-muted-foreground">Cargando...</div>
+        ) : mantenciones.length === 0 ? (
+          <div className="text-sm text-muted-foreground">Sin mantenciones registradas.</div>
+        ) : (
+          <div className="rounded-md border overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-muted">
+                <tr>
+                  <th className="text-left p-2">Fecha</th>
+                  <th className="text-left p-2">Tipo</th>
+                  <th className="text-left p-2">Descripción</th>
+                  <th className="text-right p-2">Monto</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mantenciones.slice(0, 50).map((c: any, idx: number) => (
+                  <tr key={idx} className="border-t">
+                    <td className="p-2 text-muted-foreground">{formatDate(c.fecha)}</td>
+                    <td className="p-2">{c.subcategorias_costo?.nombre ?? "—"}</td>
+                    <td className="p-2 text-muted-foreground">{c.descripcion ?? "—"}</td>
+                    <td className="p-2 text-right font-medium">{formatCLP(c.monto)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function PiezasTab({ gruaId }: { gruaId: string }) {
+  const { data: movimientos = [], isLoading } = useQuery({
+    queryKey: ["gruas", gruaId, "piezas"],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("bodega_movimientos")
@@ -479,163 +605,100 @@ function MantencionesTab({ gruaId }: { gruaId: string }) {
         .eq("grua_id", gruaId)
         .eq("tipo", "salida")
         .order("fecha", { ascending: false })
-        .limit(50);
+        .limit(100);
       if (error) throw error;
       return (data ?? []) as unknown as Movimiento[];
     },
   });
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>Mantenciones (costos)</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {loadingCostos ? (
-            <div className="text-sm text-muted-foreground">Cargando...</div>
-          ) : mantenciones.length === 0 ? (
-            <div className="text-sm text-muted-foreground">Sin mantenciones registradas.</div>
-          ) : (
-            <div className="rounded-md border overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-muted">
-                  <tr>
-                    <th className="text-left p-2">Fecha</th>
-                    <th className="text-left p-2">Tipo</th>
-                    <th className="text-left p-2">Descripción</th>
-                    <th className="text-right p-2">Monto</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {mantenciones.slice(0, 50).map((c: any, idx: number) => (
-                    <tr key={idx} className="border-t">
-                      <td className="p-2 text-muted-foreground">{formatDate(c.fecha)}</td>
-                      <td className="p-2">{c.subcategorias_costo?.nombre ?? "—"}</td>
-                      <td className="p-2 text-muted-foreground">{c.descripcion ?? "—"}</td>
-                      <td className="p-2 text-right font-medium">{formatCLP(c.monto)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Repuestos usados (bodega)</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {loadingMov ? (
-            <div className="text-sm text-muted-foreground">Cargando...</div>
-          ) : movimientos.length === 0 ? (
-            <div className="text-sm text-muted-foreground">Sin movimientos de bodega.</div>
-          ) : (
-            <div className="rounded-md border overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-muted">
-                  <tr>
-                    <th className="text-left p-2">Fecha</th>
-                    <th className="text-left p-2">Ítem</th>
-                    <th className="text-right p-2">Cantidad</th>
-                    <th className="text-left p-2">Descripción</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {movimientos.map((m) => (
-                    <tr key={m.id} className="border-t">
-                      <td className="p-2 text-muted-foreground">{formatDate(m.fecha ?? "")}</td>
-                      <td className="p-2">{m.bodega_items?.nombre ?? "—"}</td>
-                      <td className="p-2 text-right font-medium">{m.cantidad}</td>
-                      <td className="p-2 text-muted-foreground">{m.descripcion ?? "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function DocumentosTab({ gruaId }: { gruaId: string }) {
-  const { data: costos = [], isLoading } = useQuery({
-    queryKey: ["gruas", gruaId, "documentos-costos"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("costos")
-        .select("fecha,monto,subcategorias_costo(nombre),descripcion")
-        .eq("grua_id", gruaId)
-        .order("fecha", { ascending: false });
-      if (error) throw error;
-      return data ?? [];
-    },
-  });
-
-  const docs = useMemo(() => {
-    const keywords = [
-      { key: "revision", label: "Revisión técnica" },
-      { key: "soap", label: "SOAP" },
-      { key: "permiso", label: "Permiso de circulación" },
-      { key: "seguro", label: "Seguro de flota" },
-    ];
-    const now = new Date();
-    return keywords.map((k) => {
-      const hit = (costos as any[]).find((c) => {
-        const name = (c.subcategorias_costo?.nombre ?? "").toLowerCase();
-        const desc = (c.descripcion ?? "").toLowerCase();
-        return name.includes(k.key) || desc.includes(k.key);
-      });
-      const venc = hit?.fecha ? new Date(hit.fecha) : null;
-      const days = venc ? Math.ceil((venc.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)) : null;
-      const status =
-        days == null ? "sin_dato" : days < 0 ? "vencido" : days <= 30 ? "por_vencer" : "vigente";
-      return { ...k, hit, venc, status, days };
-    });
-  }, [costos]);
-
-  function badge(status: string) {
-    if (status === "vencido") return <Badge className="bg-red-600 text-white">Vencido</Badge>;
-    if (status === "por_vencer") return <Badge className="bg-amber-500 text-white">Por vencer</Badge>;
-    if (status === "vigente") return <Badge className="bg-green-600 text-white">Vigente</Badge>;
-    return <Badge variant="outline">Sin dato</Badge>;
-  }
-
-  return (
     <Card>
       <CardHeader>
-        <CardTitle>Documentos</CardTitle>
+        <CardTitle>Piezas</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="text-sm text-muted-foreground">
-          Esta vista toma la fecha del último costo asociado como referencia de vencimiento.
-        </div>
+      <CardContent>
         {isLoading ? (
           <div className="text-sm text-muted-foreground">Cargando...</div>
+        ) : movimientos.length === 0 ? (
+          <div className="text-sm text-muted-foreground">Sin movimientos de bodega.</div>
         ) : (
           <div className="rounded-md border overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-muted">
                 <tr>
-                  <th className="text-left p-2">Documento</th>
                   <th className="text-left p-2">Fecha</th>
-                  <th className="text-right p-2">Monto</th>
-                  <th className="text-left p-2">Estado</th>
+                  <th className="text-left p-2">Ítem</th>
+                  <th className="text-right p-2">Cantidad</th>
+                  <th className="text-left p-2">Descripción</th>
                 </tr>
               </thead>
               <tbody>
-                {docs.map((d) => (
-                  <tr key={d.key} className="border-t">
-                    <td className="p-2 font-medium">{d.label}</td>
-                    <td className="p-2 text-muted-foreground">
-                      {d.hit?.fecha ? formatDate(d.hit.fecha) : "—"}
+                {movimientos.map((m) => (
+                  <tr key={m.id} className="border-t">
+                    <td className="p-2 text-muted-foreground">{formatDate(m.fecha ?? "")}</td>
+                    <td className="p-2">{m.bodega_items?.nombre ?? "—"}</td>
+                    <td className="p-2 text-right font-medium">{m.cantidad}</td>
+                    <td className="p-2 text-muted-foreground">{m.descripcion ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function InventarioTab({ gruaId }: { gruaId: string }) {
+  const { data: movimientos = [], isLoading } = useQuery({
+    queryKey: ["gruas", gruaId, "inventario"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("bodega_movimientos")
+        .select("id,fecha,tipo,cantidad,descripcion,bodega_items(nombre)")
+        .eq("grua_id", gruaId)
+        .order("fecha", { ascending: false })
+        .limit(150);
+      if (error) throw error;
+      return (data ?? []) as unknown as (Movimiento & { tipo: string | null })[];
+    },
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Inventario</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="text-sm text-muted-foreground">Cargando...</div>
+        ) : movimientos.length === 0 ? (
+          <div className="text-sm text-muted-foreground">Sin movimientos asociados a esta grúa.</div>
+        ) : (
+          <div className="rounded-md border overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-muted">
+                <tr>
+                  <th className="text-left p-2">Fecha</th>
+                  <th className="text-left p-2">Tipo</th>
+                  <th className="text-left p-2">Ítem</th>
+                  <th className="text-right p-2">Cantidad</th>
+                  <th className="text-left p-2">Descripción</th>
+                </tr>
+              </thead>
+              <tbody>
+                {movimientos.map((m) => (
+                  <tr key={m.id} className="border-t">
+                    <td className="p-2 text-muted-foreground">{formatDate(m.fecha ?? "")}</td>
+                    <td className="p-2">
+                      <Badge variant="outline" className="capitalize">
+                        {(m as any).tipo ?? "—"}
+                      </Badge>
                     </td>
-                    <td className="p-2 text-right">{d.hit ? formatCLP(d.hit.monto) : "—"}</td>
-                    <td className="p-2">{badge(d.status)}</td>
+                    <td className="p-2">{m.bodega_items?.nombre ?? "—"}</td>
+                    <td className="p-2 text-right font-medium">{m.cantidad}</td>
+                    <td className="p-2 text-muted-foreground">{m.descripcion ?? "—"}</td>
                   </tr>
                 ))}
               </tbody>

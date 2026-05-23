@@ -335,7 +335,11 @@ function ClientesPage() {
                 ) : (
                   clientes.map((c) => (
                     <TableRow key={c.id}>
-                      <TableCell className="font-medium">{c.nombre}</TableCell>
+                      <TableCell className="font-medium">
+                        <Link to="/clientes/$clienteId" params={{ clienteId: c.id }} className="hover:underline">
+                          {c.nombre}
+                        </Link>
+                      </TableCell>
                       <TableCell>{c.rut ?? "—"}</TableCell>
                       <TableCell>
                         <Badge variant={tipoBadgeVariant(c.tipo)} className="capitalize">
