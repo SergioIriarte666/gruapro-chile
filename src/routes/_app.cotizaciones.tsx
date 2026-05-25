@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Search } from "lucide-react";
@@ -224,7 +224,8 @@ function CotizacionesPage() {
       )
       .subscribe();
     return () => {
-      supabase.removeChannel(channel);
+      void channel.unsubscribe();
+      void supabase.removeChannel(channel);
     };
   }, [queryClient]);
 
@@ -346,7 +347,7 @@ function CotizacionesPage() {
                         </TableCell>
                         <TableCell className="text-right">
                           <Button asChild size="sm" variant="outline">
-                            <Link to={`/cotizaciones/${c.id}` as any}>
+                            <Link to="/cotizaciones/$cotizacionId" params={{ cotizacionId: c.id }}>
                               Ver
                             </Link>
                           </Button>
@@ -372,7 +373,7 @@ function CotizacionesPage() {
             onCancel={() => setOpenCreate(false)}
             onCreated={(id) => {
               setOpenCreate(false);
-              navigate({ to: (`/cotizaciones/${id}` as any) });
+              navigate({ to: "/cotizaciones/$cotizacionId", params: { cotizacionId: id } });
             }}
           />
         </DialogContent>
@@ -642,16 +643,7 @@ function LineaEditor({
   disableRemove: boolean;
 }) {
   const [ordenSearch, setOrdenSearch] = useState("");
-  const [ordenId, setOrdenId] = useState<string>(value.orden_id ?? "none");
-  const mountedRef = useRef(false);
-
-  useEffect(() => {
-    if (!mountedRef.current) {
-      mountedRef.current = true;
-      return;
-    }
-    onChange({ ...value, orden_id: ordenId === "none" ? undefined : ordenId });
-  }, [ordenId]);
+  const ordenId = value.orden_id ?? "none";
 
   const { data: ordenes = [], isLoading } = useQuery({
     queryKey: ["ordenes", "search", ordenSearch],
@@ -693,7 +685,9 @@ function LineaEditor({
           <Label className="text-xs">Orden vinculada</Label>
           <Select
             value={ordenId}
-            onValueChange={setOrdenId}
+            onValueChange={(nextOrdenId) =>
+              onChange({ ...value, orden_id: nextOrdenId === "none" ? undefined : nextOrdenId })
+            }
             disabled={ordenSearch.trim().length > 0 && ordenSearch.trim().length < 2}
           >
             <SelectTrigger>

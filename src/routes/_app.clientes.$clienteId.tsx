@@ -48,8 +48,8 @@ type VehiculoCatalogo = Tables<"vehiculos_catalogo">;
 type ClienteVehiculo = Tables<"clientes_vehiculos"> & {
   vehiculos_catalogo: VehiculoCatalogo | null;
 };
-type OrdenServicio = Tables<"ordenes_servicio">;
 type Cierre = Tables<"cierres">;
+const PIPELINE_ESTADOS = ["pendiente", "en_curso", "completado", "facturado", "anulado"] as const;
 
 function ClienteDetailPage() {
   const { clienteId } = Route.useParams();
@@ -184,7 +184,8 @@ function ClienteDetailPage() {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      void channel.unsubscribe();
+      void supabase.removeChannel(channel);
     };
   }, [clienteId, queryClient]);
 
@@ -343,7 +344,7 @@ function ClienteDetailPage() {
       </Tabs>
 
       <Dialog open={openNuevaOrden} onOpenChange={setOpenNuevaOrden}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Nueva orden para {cliente.nombre}</DialogTitle>
             <DialogDescription>
@@ -604,11 +605,9 @@ function ServiciosTab({ clienteId }: { clienteId: string }) {
     });
   }, [ordenes, search]);
 
-  const estados = ["pendiente", "en_curso", "completado", "facturado", "anulado"] as const;
-
   const grouped = useMemo(() => {
     const map: Record<string, OrdenPipelineRow[]> = {};
-    for (const e of estados) map[e] = [];
+    for (const e of PIPELINE_ESTADOS) map[e] = [];
     for (const o of filtered) {
       const e = (o.estado ?? "pendiente") as string;
       if (!map[e]) map[e] = [];
@@ -618,7 +617,7 @@ function ServiciosTab({ clienteId }: { clienteId: string }) {
   }, [filtered]);
 
   const estadosActivos = useMemo(() => {
-    return estados.filter((e) => e !== "anulado" && (grouped[e] ?? []).length > 0).length;
+    return PIPELINE_ESTADOS.filter((e) => e !== "anulado" && (grouped[e] ?? []).length > 0).length;
   }, [grouped]);
 
   function diasEnEstado(o: OrdenPipelineRow) {
@@ -667,7 +666,7 @@ function ServiciosTab({ clienteId }: { clienteId: string }) {
             <div className="text-sm text-muted-foreground">Sin servicios.</div>
           ) : (
             <Accordion type="multiple" defaultValue={["pendiente", "en_curso"]}>
-              {estados.map((estado) => {
+              {PIPELINE_ESTADOS.map((estado) => {
                 const items = grouped[estado] ?? [];
                 const avg =
                   items.length === 0

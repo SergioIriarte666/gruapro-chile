@@ -286,7 +286,7 @@ function OrdenesPage() {
       </Card>
 
       <Dialog open={openCreate} onOpenChange={setOpenCreate}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Nueva orden de servicio</DialogTitle>
             <DialogDescription>
